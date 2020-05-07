@@ -52,7 +52,6 @@ cdef class Factor:
         self.gamma = dbn_params.get('gamma', random.random())
         self.click = <bint>click
         self.purchase = <bint>purchase
-        self.dbn_params = dbn_params
         self.cr = cr
         self.e_r_array_given_CP = e_r_array_given_CP
         self.cp_array_given_e = cp_array_given_e
@@ -115,7 +114,7 @@ cdef class Factor:
 
 cdef class DBNModel():
 
-    def run_EM(self, str file_name, object dbn_params, object cr_dict):
+    def run_EM(self, str file_name, object cr_dict):
         """
         Reads through all input files and iterates through values running the EM
         algorithm as defined by the DBN model. On each iteration, values in `dbn_params`
@@ -134,22 +133,34 @@ cdef class DBNModel():
             dict session
             dict tmp_vars
 
-        # As Python dictionaries are already quite performant we use them whenever
-        # possible
-        tmp_vars = {}
-        tmp_vars['gamma'] = [1, 2]
         print(file_name)
+        c = 0
 
         for row in gzip.GzipFile(file_name):
+            print(c)
+            c += 1
+            # As Python dictionaries are already quite performant we use them whenever
+            # possible
+            tmp_vars = {}
+            tmp_vars['gamma'] = [1, 2]
+            t0 = time.time()
             json_row = ujson.loads(row)
+            print('json row time: ', time.time() - t0)
+            t0 = time.time()
             query = self.get_search_context_string(json_row['search_keys'])
+            print('query time: ', time.time() - t0)
             sessions = json_row['judgment_keys']
             self.compute_cr(query, sessions, cr_dict)
             for session in sessions:
-                self.update_params(session, tmp_vars, query, dbn_params, cr_dict[query])
-            self.update_dbn_params(query, dbn_params, tmp_vars)
+                t0 = time.time()
+                self.update_params(session, tmp_vars, query, cr_dict[query])
+                print('update_params time: ', time.time() - t0)
+            t0 = time.time()
+            self.update_dbn_params(query, tmp_vars)
+            print('update dbn params time: ', time.time() - t0)
 
-    cdef void update_dbn_params(self, str query, object dbn_params, dict tmp_vars):
+
+    cdef void update_dbn_params(self, str query, dict tmp_vars):
         """
         After all sessions for a given query have been analyzed, the new values of
         alpha, sigma and gamma in `tmp_vars` are copied into `dbn_params` where they'll
@@ -166,23 +177,21 @@ cdef class DBNModel():
         """
         cdef dict tmp = {}
 
-        dbn_params['gamma'] = tmp_vars['gamma'][0] / tmp_vars['gamma'][1]
+        self.dbn_params['gamma'] = tmp_vars['gamma'][0] / tmp_vars['gamma'][1]
         # After updating persistence we no longer need it
         tmp_vars.pop('gamma')
 
         for doc in tmp_vars:
             for var in tmp_vars[doc]:
                 tmp[var] = tmp_vars[doc][var][0] / tmp_vars[doc][var][1]
-            dbn_params[query] = {doc: tmp}
-        print('THIS IS DBN: ', dbn_params.values())
-        self.dbn_params = dbn_params
+            self.dbn_params[query] = {doc: tmp}
+        print('dbn: ', self.dbn_params.items())
 
     cdef void update_params(
         self,
         dict session,
         dict tmp_vars,
         str query,
-        object dbn_params,
         object cr_dict
     ):
         """
@@ -212,20 +221,33 @@ cdef class DBNModel():
             int last_r, r
 
         s = list(session.values())[0]
-        e_r_array = self.build_e_r_array(s, query, dbn_params, cr_dict)
-        X_r_array = self.build_X_r_array(s, query, dbn_params)
-        e_r_array_given_CP = self.build_e_r_array_given_CP(s, query, dbn_params)
-        cp_array_given_e = self.build_CP_array_given_e(s, query, dbn_params, cr_dict)
+        t0 = time.time()
+        e_r_array = self.build_e_r_array(s, query, cr_dict)
+        print('e_r_array time: ', time.time() - t0)
+        t0 = time.time()
+        X_r_array = self.build_X_r_array(s, query)
+        print('X_r_array time: ', time.time() - t0)
+        t0 = time.time()
+        e_r_array_given_CP = self.build_e_r_array_given_CP(s, query)
+        print('e_r_array_given_CP time: ', time.time() - t0)
+        t0 = time.time()
+        cp_array_given_e = self.build_CP_array_given_e(s, query, cr_dict)
+        print('cp_array_given_e time: ', time.time() - t0)
         last_r = self.get_last_r(s)
 
         for r in range(len(s)):
-            self.update_alpha(r, query, s[r], e_r_array, X_r_array, last_r, tmp_vars,
-                              dbn_params)
-            self.update_sigma(query, r, s[r], X_r_array, last_r, tmp_vars, dbn_params)
-            self.update_gamma(r, last_r, s[r], query, dbn_params, cp_array_given_e,
+            t0 = time.time()
+            self.update_alpha(r, query, s[r], e_r_array, X_r_array, last_r, tmp_vars)
+            print('update_alpha time: ', time.time() - t0)
+            t0 = time.time()
+            self.update_sigma(query, r, s[r], X_r_array, last_r, tmp_vars)
+            print('update_sigma time: ', time.time() - t0)
+            t0 = time.time()
+            self.update_gamma(r, last_r, s[r], query, cp_array_given_e,
                               e_r_array_given_CP, cr_dict, tmp_vars)
+            print('update_gamma time: ', time.time() - t0)
 
-    cdef array.array build_e_r_array(self, list session, str query, object dbn_params,
+    cdef array.array build_e_r_array(self, list session, str query,
                                      object cr_dict):
         """
         Computes the probability of each sku in user session being examined.
@@ -265,9 +287,9 @@ cdef class DBNModel():
 
         for r in range(len(session)):
             doc = session[r]['doc']
-            alpha = dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
-            sigma = dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
-            gamma = dbn_params.get('gamma', random.random())
+            alpha = self.dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
+            sigma = self.dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
+            gamma = self.dbn_params.get('gamma', random.random())
             cr = cr_dict[doc]
             e_r_next = array.array(
                 'f',
@@ -309,7 +331,6 @@ cdef class DBNModel():
         int last_r,
         dict doc_data,
         str query,
-        object dbn_params,
         array.array cp_array_given_e,
         array.array e_r_array_given_CP,
         object cr_dict,
@@ -327,7 +348,7 @@ cdef class DBNModel():
             float ESS_0 = 0, ESS_1 = 0, ESS_denominator=0
 
         factor = Factor(r, last_r, doc_data['doc'], query, doc_data['click'],
-                        doc_data['purchase'], dbn_params, cr_dict[doc_data['doc']],
+                        doc_data['purchase'], self.dbn_params, cr_dict[doc_data['doc']],
                         e_r_array_given_CP, cp_array_given_e)
 
         for i in range(2):
@@ -350,7 +371,6 @@ cdef class DBNModel():
         array.array X_r_array,
         int last_r,
         dict tmp_vars,
-        object dbn_params
     ):
         """
         Updates the parameter alpha (attractiveness) by running the EM Algorithm.
@@ -371,7 +391,7 @@ cdef class DBNModel():
         if click:
             tmp_vars[doc]['alpha'][0] += 1
         elif r > last_r:
-            alpha = dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
+            alpha = self.dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
             tmp_vars[doc]['alpha'][0] += (
                 (1 - e_r_array[r]) * alpha / (1 - e_r_array[r] * X_r_array[r])
             )
@@ -385,7 +405,6 @@ cdef class DBNModel():
         array.array X_r_array,
         int last_r,
         dict tmp_vars,
-        object dbn_params
     ):
         """
         Updates parameter sigma (satisfaction) by running the EM Algorithm.
@@ -405,14 +424,14 @@ cdef class DBNModel():
         if not click or purchase:
             return
         if r == last_r:
-            sigma = dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
-            gamma = dbn_params.get('gamma', random.random())
+            sigma = self.dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
+            gamma = self.dbn_params.get('gamma', random.random())
             tmp_vars[doc]['sigma'][0] += (
                 sigma / (1 - (X_r_array[r + 1] * (1 - sigma) * gamma))
             )
         tmp_vars[doc]['sigma'][1] += 1
 
-    cdef array.array build_X_r_array(self, list session, str query, object dbn_params):
+    cdef array.array build_X_r_array(self, list session, str query):
         """
         X_r extends for the probability that a click will be observed at position r or
         greater given that the document at position r was examined, that is, E_r=1.
@@ -454,15 +473,14 @@ cdef class DBNModel():
         for r in range(length - 1, -1, -1):
             doc_data = session[r]
             doc = doc_data['doc']
-            alpha = dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
-            gamma = dbn_params.get('gamma', random.random())
+            alpha = self.dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
+            gamma = self.dbn_params.get('gamma', random.random())
             X_r_forward = X_r_array[r + 1]
             tmp = alpha + (1 - alpha) * gamma * X_r_forward
             X_r_array[r] = tmp
         return X_r_array
 
-    cdef array.array build_e_r_array_given_CP(self, list session, str query,
-                                              object dbn_params):
+    cdef array.array build_e_r_array_given_CP(self, list session, str query):
         """
         Computes the probability that a given document was examined given the array of
         previous clicks and purchases. Mathematically: P(E_r = 1 | C_{<r}, P_{<r})
@@ -497,9 +515,9 @@ cdef class DBNModel():
             doc = doc_data['doc']
             click = <bint>doc_data['click']
             purchase = <bint>doc_data['purchase']
-            alpha = dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
-            sigma = dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
-            gamma = dbn_params.get('gamma', random.random())
+            alpha = self.dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
+            sigma = self.dbn_params.get(query, {}).get(doc, {}).get('sigma', random.random())
+            gamma = self.dbn_params.get('gamma', random.random())
             if purchase:
                 tmp = array.array('f', [0] * (length - r))
                 array.extend(e_r_array_given_CP, tmp)
@@ -516,8 +534,7 @@ cdef class DBNModel():
                 array.extend(e_r_array_given_CP, tmp)
         return e_r_array_given_CP
 
-    cdef array.array build_CP_array_given_e(self, list session, str query,
-                                            object dbn_params, object cr_dict):
+    cdef array.array build_CP_array_given_e(self, list session, str query, object cr_dict):
         """
         Computes the probability that Clicks and Purchases will be observed at positions
         greater than r given that position at r+1 was examined. Mathematically:
@@ -550,19 +567,17 @@ cdef class DBNModel():
             e_r_array_given_CP = self.build_e_r_array_given_CP(
                 session[r + 1:],
                 query,
-                dbn_params
             )
             tmp_cp_p = array.array('f', [self.compute_cp_p(
                 session[r + 1:],
                 query,
-                dbn_params,
                 e_r_array_given_CP,
                 cr_dict
             )])
             array.extend(cp_array_given_e, tmp_cp_p)
         return cp_array_given_e
 
-    cdef float compute_cp_p(self, list session, str query, object dbn_params,
+    cdef float compute_cp_p(self, list session, str query,
                                 array.array e_r_array_given_CP, object cr_dict):
         """
         Helper function that computes the probability of observing Clicks and Purchases
@@ -607,7 +622,7 @@ cdef class DBNModel():
             doc = doc_data['doc']
             click = <bint>doc_data['click']
             purchase = <bint>doc_data['purchase']
-            alpha = dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
+            alpha = self.dbn_params.get(query, {}).get(doc, {}).get('alpha', random.random())
             if purchase:
                 tmp = array.array('f', [cr_dict[doc] * alpha * e_r_array_given_CP[r]])
                 array.extend(tmp_cp_p, tmp)
@@ -735,17 +750,10 @@ cdef class DBNModel():
 
         files = glob.glob(os.path.join(input_folder, 'jud*'))
 
-        with Manager() as manager:
-            dbn_params = manager.dict()
-            cr_dict = manager.dict()
-            dbn_params['gamma'] = random.random()
+        self.dbn_params = {}
+        cr_dict = {}
+        self.dbn_params['gamma'] = random.random()
 
-            partiated_run_EM = partial(
-                self.run_EM,
-                dbn_params=dbn_params,
-                cr_dict=cr_dict
-            )
-
-            for _ in range(iters):
-                with manager.Pool(processes=processes) as pool:
-                    pool.map(partiated_run_EM, files)
+        for _ in range(iters):
+            for file_ in files:
+                self.run_EM(file_, cr_dict)

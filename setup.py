@@ -8,8 +8,19 @@ from distutils.extension import Extension
 Cython.Compiler.Options.annotate = True
 
 ext_modules = [
-    Extension('pyClickModels.DBN', ['pyClickModels/DBN.pyx']),
-    Extension('tests.test_cy_DBN', ['tests/test_cy_DBN.pyx'])
+    Extension(
+        'pyClickModels.DBN2',
+        ['pyClickModels/DBN2.pyx'],
+        language='c++',
+        libraries=['json-c'],
+        include_dirs=['pyClickModels']
+    ),
+    Extension(
+        'tests.test_cy_DBN2',
+        ['tests/test_cy_DBN2.pyx'],
+        language='c++',
+        libraries=['json-c']
+    )
 ]
 
 install_requires = [
@@ -41,11 +52,12 @@ setup(
     author_email='willian.fuks@gmail.com',
     packages=packages,
     include_package_data=True,
+    package_data={'pyClickModels': ['*.pxd']},
     install_requires=install_requires,
     tests_require=tests_require,
     setup_requires=setup_requires,
     license='MIT',
-    ext_modules=cythonize(ext_modules),
+    ext_modules=cythonize(ext_modules, compiler_directives={'language_level': "3"}),
     cmdclass={'build_ext': build_ext},
     zip_safe=False
 )

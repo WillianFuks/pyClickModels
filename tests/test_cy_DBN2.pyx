@@ -1,70 +1,76 @@
-import array
-from collections import defaultdict
+from libcpp.string cimport string
 
-from pyClickModels.DBN cimport DBNModel, Factor
-from .conftest import build_DBN_test_data
-from numpy.testing import assert_almost_equal, assert_allclose
-
-
-sessions = [
-    {
-        'sessionID': [
-            {"doc": "doc0", "click": 0, "purchase": 0},
-            {"doc": "doc1", "click": 1, "purchase": 0},
-            {"doc": "doc2", "click": 1, "purchase": 1}
-        ]
-    },
-    {
-        'sessionID': [
-            {"doc": "doc0", "click": 0, "purchase": 0},
-            {"doc": "doc1", "click": 1, "purchase": 0},
-        ]
-    },
-
-]
-
-cr_dict = {'doc0': 0.5, 'doc1': 0.5, 'doc2': 0.5}
-
-tmp_vars = {
-    'alpha': 0.5,
-    'sigma': 0.5,
-    'gamma': 0.5
-}
-dbn_params = {
-    'query': {
-        'doc0': tmp_vars,
-        'doc1': tmp_vars,
-        'doc2': tmp_vars
-    }
-}
-dbn_params['gamma'] = 0.7
+from pyClickModels.DBN2 cimport DBNModel
+from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
+                                 json_object_object_get_ex, json_object_get_string,
+                                 json_object_get_object, lh_table, lh_entry,
+                                 json_object_array_length, json_object_array_get_idx)
+# from .conftest import build_DBN_test_data
+# from numpy.testing import assert_almost_equal, assert_allclose
 
 
-def test_fit():
-    model = DBNModel()
-    gamma, params, tmp_folder = build_DBN_test_data(users=1000, docs=10, queries=2)
-    model.fit(tmp_folder.name, processes=0, iters=1)
-    print('model dbn[gamma]: ', model.dbn_params['gamma'])
-    print('real gamma: ', gamma)
-    print('dbn keys: ', model.dbn_params.keys())
+# sessions = [
+    # {
+        # 'sessionID': [
+            # {"doc": "doc0", "click": 0, "purchase": 0},
+            # {"doc": "doc1", "click": 1, "purchase": 0},
+            # {"doc": "doc2", "click": 1, "purchase": 1}
+        # ]
+    # },
+    # {
+        # 'sessionID': [
+            # {"doc": "doc0", "click": 0, "purchase": 0},
+            # {"doc": "doc1", "click": 1, "purchase": 0},
+        # ]
+    # },
 
-    print('dbn_params[alpha] ', model.dbn_params['0_L_north']['0']['alpha'])
-    print('params alpha ', params[0][0][0])
-    print('dbn_params[sigma]', model.dbn_params['0_L_north']['0']['sigma'])
-    print('params sigma ', params[0][0][1])
+# ]
 
-    assert_allclose(model.dbn_params['gamma'], gamma, atol=.1)
-    assert_allclose(model.dbn_params['0_L_north']['0']['alpha'], params[0][0][0],
-                               atol=.15)
-    assert_allclose(model.dbn_params['0_L_north']['0']['sigma'], params[0][0][1],
-                               atol=.15)
+# cr_dict = {'doc0': 0.5, 'doc1': 0.5, 'doc2': 0.5}
+
+# tmp_vars = {
+    # 'alpha': 0.5,
+    # 'sigma': 0.5,
+    # 'gamma': 0.5
+# }
+# dbn_params = {
+    # 'query': {
+        # 'doc0': tmp_vars,
+        # 'doc1': tmp_vars,
+        # 'doc2': tmp_vars
+    # }
+# }
+# dbn_params['gamma'] = 0.7
 
 
-# def test_get_search_context_string():
+# def test_fit():
     # model = DBNModel()
-    # search_keys = {'search_term': 'query'}
-    # r = model.get_search_context_string(search_keys)
-    # assert r == 'query'
+    # gamma, params, tmp_folder = build_DBN_test_data(users=1000, docs=10, queries=2)
+    # model.fit(tmp_folder.name, processes=0, iters=1)
+    # print('model dbn[gamma]: ', model.dbn_params['gamma'])
+    # print('real gamma: ', gamma)
+    # print('dbn keys: ', model.dbn_params.keys())
+
+    # print('dbn_params[alpha] ', model.dbn_params['0_L_north']['0']['alpha'])
+    # print('params alpha ', params[0][0][0])
+    # print('dbn_params[sigma]', model.dbn_params['0_L_north']['0']['sigma'])
+    # print('params sigma ', params[0][0][1])
+
+    # assert_allclose(model.dbn_params['gamma'], gamma, atol=.1)
+    # assert_allclose(model.dbn_params['0_L_north']['0']['alpha'], params[0][0][0],
+                               # atol=.15)
+    # assert_allclose(model.dbn_params['0_L_north']['0']['sigma'], params[0][0][1],
+                               # atol=.15)
+
+
+cdef bint test_get_search_context_string():
+    cdef DBNModel model = DBNModel()
+    cdef json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
+    assert False
+    # cdef lh_table *tbl = json_object_get_object(search_keys)
+    # cdef string r = model.get_search_context_string(tbl)
+    # cdef string expected = b'query'
+    # assert r == expected
 
     # search_keys = {'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}
     # r = model.get_search_context_string(search_keys)
@@ -1107,7 +1113,7 @@ def test_fit():
     # assert dbn_params['query']['doc0']['sigma'] == 1. / 3
 
 
-# test_get_search_context_string()
+test_get_search_context_string()
 # test_compute_cr()
 # test_build_e_r_array()
 # test_build_X_r_array()
@@ -1121,4 +1127,4 @@ def test_fit():
 # test_compute_factor_last_click_higher_than_r()
 # test_update_gamma()
 # test_update_dbn_params()
-test_fit()
+# test_fit()
