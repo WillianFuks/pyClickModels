@@ -1,5 +1,8 @@
 from libcpp.string cimport string
+from libcpp.unordered_map cimport unordered_map
+from libcpp.vector cimport vector
 
+from cython.operator cimport dereference, postincrement
 from pyClickModels.DBN2 cimport DBNModel
 from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                  json_object_object_get_ex, json_object_get_string,
@@ -9,22 +12,23 @@ from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
 # from numpy.testing import assert_almost_equal, assert_allclose
 
 
-# sessions = [
-    # {
-        # 'sessionID': [
-            # {"doc": "doc0", "click": 0, "purchase": 0},
-            # {"doc": "doc1", "click": 1, "purchase": 0},
-            # {"doc": "doc2", "click": 1, "purchase": 1}
-        # ]
-    # },
-    # {
-        # 'sessionID': [
-            # {"doc": "doc0", "click": 0, "purchase": 0},
-            # {"doc": "doc1", "click": 1, "purchase": 0},
-        # ]
-    # },
+cdef const char *sessions = b"""[
+    {
+        'session': [
+            {"doc": "doc0", "click": 0, "purchase": 0},
+            {"doc": "doc1", "click": 1, "purchase": 0},
+            {"doc": "doc2", "click": 1, "purchase": 1}
+        ]
+    },
+    {
+        'session': [
+            {"doc": "doc0", "click": 0, "purchase": 0},
+            {"doc": "doc1", "click": 1, "purchase": 0},
+        ]
+    },
 
-# ]
+]
+"""
 
 # cr_dict = {'doc0': 0.5, 'doc1': 0.5, 'doc2': 0.5}
 
@@ -66,22 +70,39 @@ from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
 cdef bint test_get_search_context_string():
     cdef DBNModel model = DBNModel()
     cdef json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
-    assert False
-    # cdef lh_table *tbl = json_object_get_object(search_keys)
-    # cdef string r = model.get_search_context_string(tbl)
-    # cdef string expected = b'query'
-    # assert r == expected
+    cdef lh_table *tbl = json_object_get_object(search_keys)
+    cdef string r = model.get_search_context_string(tbl)
+    cdef string expected = b'search_term:query'
+    assert r == expected
 
-    # search_keys = {'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}
-    # r = model.get_search_context_string(search_keys)
-    # assert r == 'query_value0_value1'
+    search_keys = json_tokener_parse(
+        b"{'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}"
+    )
+
+    tbl = json_object_get_object(search_keys)
+    r = model.get_search_context_string(tbl)
+    assert r == b'search_term:query|key0:value0|key1:value1'
 
 
-# def test_compute_cr():
-    # model = DBNModel()
-    # query = 'query'
-    # cr_dict = {}
-    # model.compute_cr(query, sessions, cr_dict)
+cdef test_compute_cr(const char *sessions):
+    cdef:
+        DBNModel model = DBNModel()
+        string query = b'query'
+        # cr_dict is like: {'query_term': {'doc0': 0.2, 'doc1: 0}}
+        unordered_map[string, unordered_map[string, float]] cr_dict
+        json_object *jso_sessions = json_tokener_parse(sessions)
+        unordered_map[string, unordered_map[string, float]] expected
+
+    expected[query][b'doc0'] = <float>0
+    expected[query][b'doc1'] = <float>0
+
+    print('expected: ', str(expected))
+
+    model.compute_cr(query, jso_sessions, &cr_dict)
+    print(cr_dict)
+    assert expected == cr_dict
+
+
     # expected = {'query': {'doc0': 0.0, 'doc1': 0.0, 'doc2': 1.}}
     # assert expected == cr_dict
 
@@ -1114,7 +1135,7 @@ cdef bint test_get_search_context_string():
 
 
 test_get_search_context_string()
-# test_compute_cr()
+test_compute_cr(sessions)
 # test_build_e_r_array()
 # test_build_X_r_array()
 # test_build_e_r_array_given_CP()

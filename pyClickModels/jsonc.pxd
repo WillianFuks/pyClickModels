@@ -30,3 +30,4 @@ cdef extern from "/usr/include/json-c/json.h":
     void *lh_entry_k(lh_entry *entry)
     size_t json_object_array_length(const json_object *obj)
     json_object *json_object_array_get_idx(const json_object *jso, size_t idx)
+    int json_object_get_int(const json_object *obj)
