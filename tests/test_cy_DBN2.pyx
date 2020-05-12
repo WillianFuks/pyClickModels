@@ -1,4 +1,5 @@
 from libcpp.string cimport string
+from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
 
@@ -9,8 +10,9 @@ from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                  json_object_get_object, lh_table, lh_entry,
                                  json_object_array_length, json_object_array_get_idx)
 # from .conftest import build_DBN_test_data
-# from numpy.testing import assert_almost_equal, assert_allclose
+from numpy.testing import assert_almost_equal, assert_allclose
 
+ctypedef unordered_map[string, unordered_map[string, float]] dbn_param
 
 cdef const char *sessions = b"""[
     {
@@ -29,6 +31,21 @@ cdef const char *sessions = b"""[
 
 ]
 """
+
+cdef string query = b'query'
+cdef dbn_param alpha_params
+cdef dbn_param sigma_params
+cdef float gamma_param
+alpha_params[query][b'doc0'] = 0.5
+alpha_params[query][b'doc1'] = 0.5
+alpha_params[query][b'doc2'] = 0.5
+
+sigma_params[query][b'doc0'] = 0.5
+sigma_params[query][b'doc1'] = 0.5
+sigma_params[query][b'doc2'] = 0.5
+
+gamma_param = 0.7
+
 
 # cr_dict = {'doc0': 0.5, 'doc1': 0.5, 'doc2': 0.5}
 
@@ -68,11 +85,12 @@ cdef const char *sessions = b"""[
 
 
 cdef bint test_get_search_context_string():
-    cdef DBNModel model = DBNModel()
-    cdef json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
-    cdef lh_table *tbl = json_object_get_object(search_keys)
-    cdef string r = model.get_search_context_string(tbl)
-    cdef string expected = b'search_term:query'
+    cdef:
+        DBNModel model = DBNModel()
+        json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
+        lh_table *tbl = json_object_get_object(search_keys)
+        string r = model.get_search_context_string(tbl)
+        string expected = b'search_term:query'
     assert r == expected
 
     search_keys = json_tokener_parse(
@@ -96,24 +114,38 @@ cdef test_compute_cr(const char *sessions):
     expected[query][b'doc0'] = <float>0
     expected[query][b'doc1'] = <float>0
 
-    print('expected: ', str(expected))
+    model.compute_cr(&query, jso_sessions, &cr_dict)
+    assert expected == cr_dict
 
-    model.compute_cr(query, jso_sessions, &cr_dict)
-    print(cr_dict)
+    # test if query is already available in cr_dict
+    jso_sessions = json_tokener_parse(<const char *>'')
+    model.compute_cr(&query, jso_sessions, &cr_dict)
     assert expected == cr_dict
 
 
-    # expected = {'query': {'doc0': 0.0, 'doc1': 0.0, 'doc2': 1.}}
-    # assert expected == cr_dict
+cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
+                           float *gamma_param):
+    cdef const char *s = (
+        b'[{"doc": "doc0", "click": 0, "purchase": 0},'
+        b'{"doc": "doc1", "click": 1, "purchase": 0},'
+        b'{"doc": "doc2", "click": 1, "purchase": 1}]'
+    )
+    cdef json_object *session = json_tokener_parse(s)
+    cdef string query = b'query'
+    cdef unordered_map[string, float] cr_dict
+    cdef vector[float] expected = [1, 0.4375, 0.1914, 0.0837]
+    cdef vector[float] r
+    cr_dict[b'doc0'] = 0.5
+    cr_dict[b'doc1'] = 0.5
+    cr_dict[b'doc2'] = 0.5
 
+    model = DBNModel()
+    model.alpha_params = alpha_params[0]
+    model.sigma_params = sigma_params[0]
+    model.gamma_param = gamma_param[0]
 
-# def test_build_e_r_array():
-    # session = list(sessions[0].values())[0]
-    # model = DBNModel()
-    # r = model.build_e_r_array(session, 'query', dbn_params, cr_dict)
-    # expected = [1, 0.4375, 0.1914, 0.0837]
-    # assert_almost_equal(list(r), expected, decimal=4)
-
+    r = model.build_e_r_vector(session, &query, &cr_dict)
+    assert_almost_equal(r, expected, decimal=4)
 
 # def test_build_X_r_array():
     # session = list(sessions[0].values())[0]
@@ -1136,7 +1168,7 @@ cdef test_compute_cr(const char *sessions):
 
 test_get_search_context_string()
 test_compute_cr(sessions)
-# test_build_e_r_array()
+test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
 # test_build_X_r_array()
 # test_build_e_r_array_given_CP()
 # test_build_cp_p()
