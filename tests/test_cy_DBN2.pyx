@@ -139,7 +139,7 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     cr_dict[b'doc1'] = 0.5
     cr_dict[b'doc2'] = 0.5
 
-    model = DBNModel()
+    cdef DBNModel model = DBNModel()
     model.alpha_params = alpha_params[0]
     model.sigma_params = sigma_params[0]
     model.gamma_param = gamma_param[0]
@@ -147,33 +147,59 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     r = model.build_e_r_vector(session, &query, &cr_dict)
     assert_almost_equal(r, expected, decimal=4)
 
-# def test_build_X_r_array():
-    # session = list(sessions[0].values())[0]
-    # model = DBNModel()
-    # r = model.build_X_r_array(session, 'query', dbn_params)
-    # expected = [0.73625, 0.675, 0.5, 0]
-    # assert_almost_equal(list(r), expected, decimal=4)
+
+cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
+                         float *gamma_param):
+    cdef const char *s = (
+        b'[{"doc": "doc0", "click": 0, "purchase": 0},'
+        b'{"doc": "doc1", "click": 1, "purchase": 0},'
+        b'{"doc": "doc2", "click": 1, "purchase": 1}]'
+    )
+    cdef json_object *session = json_tokener_parse(s)
+    cdef vector[float] expected = [0.73625, 0.675, 0.5, 0]
+    cdef vector[float] r
+    cdef string query = b'query'
+
+    cdef DBNModel model = DBNModel()
+
+    model.alpha_params = alpha_params[0]
+    model.sigma_params = sigma_params[0]
+    model.gamma_param = gamma_param[0]
+
+    r = model.build_X_r_vector(session, &query)
+    assert_almost_equal(r, expected, decimal=4)
 
 
-# def test_build_e_r_array_given_CP():
-    # s = [
-        # {"doc": "doc0", "click": 0, "purchase": 0},
-        # {"doc": "doc0", "click": 1, "purchase": 1},
-        # {"doc": "doc1", "click": 0, "purchase": 0}
-    # ]
-    # expected = [1, 0.7, 0, 0]
-    # model = DBNModel()
-    # r = model.build_e_r_array_given_CP(s, 'query', dbn_params)
-    # assert_almost_equal(list(r), expected, decimal=4)
+cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_params,
+                                    float *gamma_param):
+    cdef char *s = (
+        b'[{"doc": "doc0", "click": 0, "purchase": 0},'
+        b'{"doc": "doc0", "click": 1, "purchase": 1},'
+        b'{"doc": "doc1", "click": 0, "purchase": 0}]'
+    )
+    cdef json_object *session = json_tokener_parse(s)
+    cdef vector[float] expected = [1, 0.7, 0, 0]
+    cdef vector[float] r
+    cdef string query = b'query'
+    cdef DBNModel model = DBNModel()
 
-    # s = [
-        # {"doc": "doc0", "click": 0, "purchase": 0},
-        # {"doc": "doc0", "click": 1, "purchase": 0},
-        # {"doc": "doc1", "click": 0, "purchase": 0}
-    # ]
-    # expected = [1, 0.7, 0.35, 0.1484]
-    # r = model.build_e_r_array_given_CP(s, 'query', dbn_params)
-    # assert_almost_equal(list(r), expected, decimal=4)
+    model.alpha_params = alpha_params[0]
+    model.sigma_params = sigma_params[0]
+    model.gamma_param = gamma_param[0]
+
+    r = model.build_e_r_vector_given_CP(session, &query)
+    assert_almost_equal(r, expected, decimal=4)
+
+    s = (
+        b'[{"doc": "doc0", "click": 0, "purchase": 0},'
+        b'{"doc": "doc0", "click": 1, "purchase": 0},'
+        b'{"doc": "doc1", "click": 0, "purchase": 0}]'
+    )
+    session = json_tokener_parse(s)
+    expected = [1, 0.7, 0.35, 0.1484]
+
+    r = model.build_e_r_vector_given_CP(session, &query)
+    assert_almost_equal(r, expected, decimal=4)
 
 
 # def test_build_cp_p():
@@ -1169,8 +1195,8 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
 test_get_search_context_string()
 test_compute_cr(sessions)
 test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
-# test_build_X_r_array()
-# test_build_e_r_array_given_CP()
+test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
+test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
 # test_build_cp_p()
 # test_build_CP_array_given_e()
 # test_get_last_r()
