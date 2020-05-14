@@ -299,7 +299,7 @@ cdef class DBNModel():
         return X_r_vector
 
     cdef vector[float] build_e_r_vector_given_CP(self, json_object *session,
-                                                 string *query):
+                                                 unsigned int idx, string *query):
         """
         Computes the probability that a given document was examined given the array of
         previous clicks and purchases.
@@ -310,6 +310,8 @@ cdef class DBNModel():
         ----
           session: *json_object
               Clickstream of user session
+          idx: unsigned int
+              Index from where to start slicing sessions
           query: *string
 
         Returns
@@ -328,12 +330,12 @@ cdef class DBNModel():
             bint purchase
             json_object *tmp
             # position r + 1 will be required later on so we add +1 in computation
-            vector[float] e_r_vector_given_CP = vector[float](total_docs + 1, 0.0)
+            vector[float] e_r_vector_given_CP = vector[float](total_docs + 1 - idx, 0.0)
 
         # First document has 100% of being Examined regardless of clicks or purchases.
         e_r_vector_given_CP[0] = 1
 
-        for r in range(total_docs):
+        for r in range(idx, total_docs):
             json_object_object_get_ex(
                 json_object_array_get_idx(session, r),
                 b'doc',
@@ -362,10 +364,171 @@ cdef class DBNModel():
             if purchase:
                 return e_r_vector_given_CP
             elif click:
-                e_r_vector_given_CP[r + 1] = (1 - sigma[0]) * gamma[0]
+                e_r_vector_given_CP[r + 1 - idx] = (1 - sigma[0]) * gamma[0]
             else:
-                e_r_vector_given_CP[r + 1] = (
-                    (gamma[0] * (1 - alpha[0]) * e_r_vector_given_CP[r]) /
-                    (1 - alpha[0] * e_r_vector_given_CP[r])
+                e_r_vector_given_CP[r + 1 - idx] = (
+                    (gamma[0] * (1 - alpha[0]) * e_r_vector_given_CP[r - idx]) /
+                    (1 - alpha[0] * e_r_vector_given_CP[r - idx])
                 )
         return e_r_vector_given_CP
+
+    cdef float compute_cp_p(
+        self,
+        json_object *session,
+        unsigned int idx,
+        string *query,
+        vector[float] *e_r_array_given_CP,
+        unordered_map[string, float] *cr_dict
+    ):
+        """
+        Helper function that computes the probability of observing Clicks and Purchases
+        at positions greater than r given that position r + 1 was examined.
+
+        Mathematically:
+
+        P(C_{>= r+1}, P_{>= r+1} | E_{r+1})
+
+        Args
+        ----
+          session: *json_object
+              Customer's clickstream.
+          idx: unsigned int
+              Index from where to start slicing json session
+          query: *string
+          cr_dict: unordered_map[string, float] *cr_dict
+              Conversion Rate (CR) of documents for current query
+          e_r_array_given_CP: vector[float]
+              Probability of document being examined at position r given Clicks and
+              Purchases observed before r.
+
+        Returns
+        -------
+          cp_p: float
+              Computes the probability of observing Clicks and Purchases at positions
+              greater than r given that r + 1 was examined.
+        """
+        cdef:
+            size_t total_docs = json_object_array_length(session)
+            unsigned int r
+            string doc
+            float *alpha
+            bint click
+            bint purchase
+            json_object *tmp
+            float cp_p = 1
+
+        for r in range(idx, total_docs):
+            json_object_object_get_ex(
+                json_object_array_get_idx(session, r),
+                b'doc',
+                &tmp
+            )
+            doc = json_object_get_string(tmp)
+
+            json_object_object_get_ex(
+                json_object_array_get_idx(session, r),
+                b'click',
+                &tmp
+            )
+            click = <bint>json_object_get_int(tmp)
+
+            json_object_object_get_ex(
+                json_object_array_get_idx(session, r),
+                b'purchase',
+                &tmp
+            )
+            purchase = <bint>json_object_get_int(tmp)
+
+            alpha = self.get_param(b'alpha', query, &doc)
+
+            # we subtract `idx` from `r` because the input `e_r_array_given_CP`
+            # should always be counted from the beginning (despite the slicing in
+            # sessions, this variable should still be counted as if the new session
+            # is not a slice of any sort).
+            if purchase:
+                cp_p *= cr_dict[0][doc] * alpha[0] * e_r_array_given_CP[0][r - idx]
+            elif click:
+                cp_p *= (
+                    (1 - cr_dict[0][doc]) * alpha[0] * e_r_array_given_CP[0][r - idx]
+                )
+            else:
+                cp_p *= 1 - alpha[0] * e_r_array_given_CP[0][r - idx]
+        return cp_p
+
+    cdef vector[float] build_CP_vector_given_e(
+        self,
+        json_object *session,
+        string *query,
+        unordered_map[string, float] *cr_dict
+    ):
+        """
+        Computes the probability that Clicks and Purchases will be observed at positions
+        greater than r given that position at r+1 was examined.
+
+        Mathematically:
+
+        P(C_{>r}, P_{>r} | E_{r+1})
+
+        Args
+        ----
+          session: *json_object
+              User clickstream
+          query: *string
+          cr_dict: *unordered_map[string, float]
+            Conversion Rate (CR) of documents for current query
+
+        Returns
+        -------
+          cp_vector_given_e: vector[float]
+              Probability of observing Clicks and Purchases at positions greater than
+              r given that position r + 1 was examined.
+        """
+        cdef:
+            unsigned int r
+            size_t total_docs = json_object_array_length(session)
+            vector[float] e_r_vector_given_CP
+            vector[float] cp_vector_given_e = vector[float](total_docs - 1)
+
+        # Subtract 1 as we iterate up to E_{r+1} defined up to r - 1 document
+        for r in range(total_docs - 1):
+            e_r_vector_given_CP = self.build_e_r_vector_given_CP(session, r + 1, query)
+            cp_vector_given_e[r] = self.compute_cp_p(session, r + 1, query,
+                                                     &e_r_vector_given_CP, cr_dict)
+        return cp_vector_given_e
+
+    cdef int get_last_r(self, json_object *session, const char *event=b'click'):
+        """
+        Loops through all documents in session and find at which position the desired
+        event happend. It can be either a 'click' or a 'purchase' (still, in DBN, if
+        a purchase is observed then it automatically means it is the very last r
+        observed).
+
+        Args
+        ----
+          session: *json_object
+              User clickstream
+          event: const char*
+              Name of desired event to track.
+
+        Returns
+        -------
+          last_r: int
+              Index at which the last desired event was observed.
+        """
+        cdef:
+            unsigned int r
+            size_t total_docs = json_object_array_length(session)
+            int idx = 0
+            json_object *tmp
+            bint value
+
+        for r in range(total_docs):
+            json_object_object_get_ex(
+                json_object_array_get_idx(session, r),
+                event,
+                &tmp
+            )
+            value = <bint>json_object_get_int(tmp)
+            if value == 1:
+                idx = r
+        return idx

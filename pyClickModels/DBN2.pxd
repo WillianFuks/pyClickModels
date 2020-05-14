@@ -15,4 +15,7 @@ cdef class DBNModel:
         float *get_param(self, string param, string *query, string *doc, int seed=*)
         vector[float] build_e_r_vector(self, json_object *session, string *query, unordered_map[string, float] *cr_dict)
         vector[float] build_X_r_vector(self, json_object *session, string *query)
-        vector[float] build_e_r_vector_given_CP(self, json_object *session, string *query)
+        vector[float] build_e_r_vector_given_CP(self, json_object *session, unsigned int idx, string *query)
+        float compute_cp_p(self, json_object *session, unsigned int idx, string *query, vector[float] *e_r_array_given_CP, unordered_map[string, float] *cr_dict)
+        vector[float] build_CP_vector_given_e(self, json_object *session, string *query, unordered_map[string, float] *cr_dict)
+        int get_last_r(self, json_object *session, const char *event=*)
