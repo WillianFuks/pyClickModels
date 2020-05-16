@@ -1,15 +1,11 @@
 from libcpp.string cimport string
-from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
 
-from cython.operator cimport dereference, postincrement
-from pyClickModels.DBN2 cimport DBNModel
+from pyClickModels.DBN2 cimport DBNModel, Factor
 from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
-                                 json_object_object_get_ex, json_object_get_string,
-                                 json_object_get_object, lh_table, lh_entry,
-                                 json_object_array_length, json_object_array_get_idx)
-# from .conftest import build_DBN_test_data
+                                 json_object_get_object, lh_table)
+from .conftest import build_DBN_test_data
 from numpy.testing import assert_almost_equal, assert_allclose
 
 ctypedef unordered_map[string, unordered_map[string, float]] dbn_param
@@ -36,6 +32,7 @@ cdef string query = b'query'
 cdef dbn_param alpha_params
 cdef dbn_param sigma_params
 cdef float gamma_param
+
 alpha_params[query][b'doc0'] = 0.5
 alpha_params[query][b'doc1'] = 0.5
 alpha_params[query][b'doc2'] = 0.5
@@ -47,41 +44,24 @@ sigma_params[query][b'doc2'] = 0.5
 gamma_param = 0.7
 
 
-# cr_dict = {'doc0': 0.5, 'doc1': 0.5, 'doc2': 0.5}
+cdef test_fit():
+    cdef:
+        DBNModel model = DBNModel()
+    gamma, params, tmp_folder = build_DBN_test_data(users=1000, docs=10, queries=2)
 
-# tmp_vars = {
-    # 'alpha': 0.5,
-    # 'sigma': 0.5,
-    # 'gamma': 0.5
-# }
-# dbn_params = {
-    # 'query': {
-        # 'doc0': tmp_vars,
-        # 'doc1': tmp_vars,
-        # 'doc2': tmp_vars
-    # }
-# }
-# dbn_params['gamma'] = 0.7
+    model.fit(tmp_folder.name, iters=1)
+    print('model dbn[gamma]: ', model.dbn_params['gamma'])
+    print('real gamma: ', gamma)
+    print('dbn keys: ', model.dbn_params.keys())
 
+    print('dbn_params[alpha] ', model.dbn_params['0_L_north']['0']['alpha'])
+    print('params alpha ', params[0][0][0])
+    print('dbn_params[sigma]', model.dbn_params['0_L_north']['0']['sigma'])
+    print('params sigma ', params[0][0][1])
 
-# def test_fit():
-    # model = DBNModel()
-    # gamma, params, tmp_folder = build_DBN_test_data(users=1000, docs=10, queries=2)
-    # model.fit(tmp_folder.name, processes=0, iters=1)
-    # print('model dbn[gamma]: ', model.dbn_params['gamma'])
-    # print('real gamma: ', gamma)
-    # print('dbn keys: ', model.dbn_params.keys())
-
-    # print('dbn_params[alpha] ', model.dbn_params['0_L_north']['0']['alpha'])
-    # print('params alpha ', params[0][0][0])
-    # print('dbn_params[sigma]', model.dbn_params['0_L_north']['0']['sigma'])
-    # print('params sigma ', params[0][0][1])
-
-    # assert_allclose(model.dbn_params['gamma'], gamma, atol=.1)
-    # assert_allclose(model.dbn_params['0_L_north']['0']['alpha'], params[0][0][0],
-                               # atol=.15)
-    # assert_allclose(model.dbn_params['0_L_north']['0']['sigma'], params[0][0][1],
-                               # atol=.15)
+    assert_allclose(model.gamma_param, gamma, atol=.1)
+    assert_allclose(model.alpha_params[b'0_L_north'][b'0'], params[0][0][0], atol=.15)
+    assert_allclose(model.sigma_params[b'0_L_north'][b'0'], params[0][0][1], atol=.15)
 
 
 cdef bint test_get_search_context_string():
@@ -89,17 +69,17 @@ cdef bint test_get_search_context_string():
         DBNModel model = DBNModel()
         json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
         lh_table *tbl = json_object_get_object(search_keys)
-        string r = model.get_search_context_string(tbl)
+        string result = model.get_search_context_string(tbl)
         string expected = b'search_term:query'
-    assert r == expected
+    assert result == expected
 
     search_keys = json_tokener_parse(
         b"{'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}"
     )
 
     tbl = json_object_get_object(search_keys)
-    r = model.get_search_context_string(tbl)
-    assert r == b'search_term:query|key0:value0|key1:value1'
+    result = model.get_search_context_string(tbl)
+    assert result == b'search_term:query|key0:value0|key1:value1'
 
 
 cdef test_compute_cr(const char *sessions):
@@ -134,7 +114,7 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
         json_object *session = json_tokener_parse(s)
         string query = b'query'
         vector[float] expected = [1, 0.4375, 0.1914, 0.0837]
-        vector[float] r
+        vector[float] result
         unordered_map[string, float] cr_dict
         DBNModel model = DBNModel()
 
@@ -146,8 +126,8 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     model.sigma_params = sigma_params[0]
     model.gamma_param = gamma_param[0]
 
-    r = model.build_e_r_vector(session, &query, &cr_dict)
-    assert_almost_equal(r, expected, decimal=4)
+    result = model.build_e_r_vector(session, &query, &cr_dict)
+    assert_almost_equal(result, expected, decimal=4)
 
 
 cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -160,7 +140,7 @@ cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
         )
         json_object *session = json_tokener_parse(s)
         vector[float] expected = [0.73625, 0.675, 0.5, 0]
-        vector[float] r
+        vector[float] result
         string query = b'query'
 
         DBNModel model = DBNModel()
@@ -169,8 +149,8 @@ cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     model.sigma_params = sigma_params[0]
     model.gamma_param = gamma_param[0]
 
-    r = model.build_X_r_vector(session, &query)
-    assert_almost_equal(r, expected, decimal=4)
+    result = model.build_X_r_vector(session, &query)
+    assert_almost_equal(result, expected, decimal=4)
 
 
 cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -183,7 +163,7 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
         )
         json_object *session = json_tokener_parse(s)
         vector[float] expected = [1, 0.7, 0, 0]
-        vector[float] r
+        vector[float] result
         string query = b'query'
         DBNModel model = DBNModel()
 
@@ -191,16 +171,16 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
     model.sigma_params = sigma_params[0]
     model.gamma_param = gamma_param[0]
 
-    r = model.build_e_r_vector_given_CP(session, 0, &query)
-    assert_almost_equal(r, expected, decimal=4)
+    result = model.build_e_r_vector_given_CP(session, 0, &query)
+    assert_almost_equal(result, expected, decimal=4)
 
-    r = model.build_e_r_vector_given_CP(session, 1, &query)
+    result = model.build_e_r_vector_given_CP(session, 1, &query)
     expected = [1, 0, 0]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
-    r = model.build_e_r_vector_given_CP(session, 2, &query)
+    result = model.build_e_r_vector_given_CP(session, 2, &query)
     expected = [1, 0.7]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -210,16 +190,16 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
     session = json_tokener_parse(s)
     expected = [1, 0.7, 0.35, 0.1484]
 
-    r = model.build_e_r_vector_given_CP(session, 0, &query)
-    assert_almost_equal(r, expected, decimal=4)
+    result = model.build_e_r_vector_given_CP(session, 0, &query)
+    assert_almost_equal(result, expected, decimal=4)
 
-    r = model.build_e_r_vector_given_CP(session, 1, &query)
+    result = model.build_e_r_vector_given_CP(session, 1, &query)
     expected = [1, 0.35, 0.148484]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
-    r = model.build_e_r_vector_given_CP(session, 2, &query)
+    result = model.build_e_r_vector_given_CP(session, 2, &query)
     expected = [1, 0.7]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
 
 cdef test_build_cp_p(dbn_param *alpha_params):
@@ -231,7 +211,7 @@ cdef test_build_cp_p(dbn_param *alpha_params):
         )
         json_object *session = json_tokener_parse(s)
         float expected = 0.005625
-        float r
+        float result
         string query = b'query'
         vector[float] e_r_vector_given_CP = [1, 0.6, 0.3]
         DBNModel model = DBNModel()
@@ -243,12 +223,12 @@ cdef test_build_cp_p(dbn_param *alpha_params):
 
     model.alpha_params = alpha_params[0]
 
-    r = model.compute_cp_p(session, 0, &query, &e_r_vector_given_CP, &cr_dict)
-    assert_almost_equal(r, expected, decimal=6)
+    result = model.compute_cp_p(session, 0, &query, &e_r_vector_given_CP, &cr_dict)
+    assert_almost_equal(result, expected, decimal=6)
 
     expected = 0.0375
-    r = model.compute_cp_p(session, 1, &query, &e_r_vector_given_CP, &cr_dict)
-    assert_almost_equal(r, expected, decimal=6)
+    result = model.compute_cp_p(session, 1, &query, &e_r_vector_given_CP, &cr_dict)
+    assert_almost_equal(result, expected, decimal=6)
 
 
 cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -260,7 +240,7 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
         )
         json_object *session = json_tokener_parse(s)
         DBNModel model = DBNModel()
-        vector[float] r
+        vector[float] result
         vector[float] expected
         unordered_map[string, float] cr_dict
 
@@ -272,9 +252,9 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
     model.sigma_params = sigma_params[0]
     model.gamma_param = gamma_param[0]
 
-    r = model.build_CP_vector_given_e(session, &query, &cr_dict)
+    result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.25]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -283,9 +263,9 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
     )
     session = json_tokener_parse(s)
 
-    r = model.build_CP_vector_given_e(session, &query, &cr_dict)
+    result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.021875, 0.25]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -294,9 +274,9 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
     )
     session = json_tokener_parse(s)
 
-    r = model.build_CP_vector_given_e(session, &query, &cr_dict)
+    result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.2062, 0.5]
-    assert_almost_equal(r, expected, decimal=4)
+    assert_almost_equal(result, expected, decimal=4)
 
 
 cdef test_get_last_r():
@@ -309,8 +289,8 @@ cdef test_get_last_r():
             b'{"doc": "doc2", "click": 1, "purchase": 1}]'
         )
         json_object *session = json_tokener_parse(s)
-        int r = model.get_last_r(session)
-    assert r == 3
+        int result = model.get_last_r(session)
+    assert result == 3
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -319,935 +299,1135 @@ cdef test_get_last_r():
         b'{"doc": "doc2", "click": 0, "purchase": 1}]'
     )
     session = json_tokener_parse(s)
-    r = model.get_last_r(session)
-    assert r == 2
+    result = model.get_last_r(session)
+    assert result == 2
 
 
-# def test_update_alpha():
-    # model = DBNModel()
-    # r = 0
-    # last_r = 1
-    # doc_data = {'doc': 'doc0', 'click': 1}
-    # e_r_array = array.array('f', [0.5])
-    # X_r_array = array.array('f', [0.5])
-    # tmp_vars = {
-        # 'doc0': {'alpha': [0, 0]}
-    # }
-    # model.update_alpha(r, 'query', doc_data, e_r_array, X_r_array, last_r, tmp_vars,
-                       # dbn_params)
-    # assert tmp_vars['doc0']['alpha'] == [1, 1]
+cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
+                       float *gamma_param):
+    cdef:
+        DBNModel model = DBNModel()
+        unsigned int r = 0
+        unsigned int last_r = 1
+        char *s = b'{"doc": "doc0", "click": 1}'
+        json_object *doc_data = json_tokener_parse(s)
+        vector[float] e_r_vector = [0.5]
+        vector[float] X_r_vector = [0.5]
+        string query = b'query'
+        unordered_map[string, vector[float]] tmp_alpha_param
+        vector[float] expected
 
-    # r = 1
-    # last_r = 0
-    # doc_data = {'doc': 'doc0', 'click': 0}
-    # e_r_array = array.array('f', [0.5, 0.5])
-    # X_r_array = array.array('f', [0.5, 0.5])
-    # tmp_vars = {
-        # 'doc0': {'alpha': [0, 0]}
-    # }
-    # model.update_alpha(r, 'query', doc_data, e_r_array, X_r_array, last_r, tmp_vars,
-                       # dbn_params)
-    # expected = [1. / 3, 1]
-    # assert_almost_equal(tmp_vars['doc0']['alpha'], expected, decimal=4)
+    model.alpha_params = alpha_params[0]
+    model.sigma_params = sigma_params[0]
+    model.gamma_param = gamma_param[0]
 
-    # r = 1
-    # last_r = 2
-    # doc_data = {'doc': 'doc0', 'click': 0}
-    # e_r_array = array.array('f', [0.5, 0.5])
-    # X_r_array = array.array('f', [0.5, 0.5])
-    # tmp_vars = {
-        # 'doc0': {'alpha': [0, 0]}
-    # }
-    # model.update_alpha(r, 'query', doc_data, e_r_array, X_r_array, last_r, tmp_vars,
-                       # dbn_params)
-    # expected = [0.0, 1]
-    # assert_almost_equal(tmp_vars['doc0']['alpha'], expected, decimal=4)
+    tmp_alpha_param[b'doc0'] = [0, 0]
 
+    model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
+                       &tmp_alpha_param)
+    assert tmp_alpha_param[b'doc0'] == [1, 1]
 
-# def test_update_sigma():
-    # model = DBNModel()
-    # r = 0
-    # last_r = 1
-    # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # X_r_array = array.array('f', [0.5, 0.5, 0.5])
-    # tmp_vars = {
-        # 'doc0': {'sigma': [0, 0]}
-    # }
-    # model.update_sigma('query', r, doc_data, X_r_array, last_r, tmp_vars, dbn_params)
-    # expected = [0, 0]
-    # assert_almost_equal(tmp_vars['doc0']['sigma'], expected, decimal=4)
+    r = 1
+    last_r = 0
+    s = b'{"doc": "doc0", "click": 0}'
+    doc_data = json_tokener_parse(s)
+    e_r_vector = [0.5, 0.5]
+    X_r_vector = [0.5, 0.5]
+    tmp_alpha_param[b'doc0'] = [0, 0]
+    model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
+                       &tmp_alpha_param)
+    expected = [1. / 3, 1]
+    assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
 
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # tmp_vars = {
-        # 'doc0': {'sigma': [0, 0]}
-    # }
-    # model.update_sigma('query', r, doc_data, X_r_array, last_r, tmp_vars, dbn_params)
-    # expected = [0, 1]
-    # assert_almost_equal(tmp_vars['doc0']['sigma'], expected, decimal=4)
-
-    # r = 1
-    # tmp_vars = {
-        # 'doc0': {'sigma': [0, 0]}
-    # }
-    # model.update_sigma('query', r, doc_data, X_r_array, last_r, tmp_vars, dbn_params)
-    # expected = [0.6060, 1]
-    # assert_almost_equal(tmp_vars['doc0']['sigma'], expected, decimal=4)
+    r = 1
+    last_r = 2
+    s = b'{"doc": "doc0", "click": 0}'
+    doc_data = json_tokener_parse(s)
+    e_r_vector = [0.5, 0.5]
+    X_r_vector = [0.5, 0.5]
+    tmp_alpha_param[b'doc0'] = [0, 0]
+    model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
+                       &tmp_alpha_param)
+    expected = [0.0, 1]
+    assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
 
 
-# def test_compute_factor_last_click_lower_than_r():
-    # r = 0
-    # cp_array_given_e = array.array('f', [0.2])
-    # e_r_array_given_CP = array.array('f', [0.4])
-    # cr_dict = {'doc0': 0.1}
-    # last_r = 0
-    # model = DBNModel()
+cdef test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
+                       float *gamma_param):
+    cdef:
+        DBNModel model = DBNModel()
+        unsigned int r = 0
+        unsigned int last_r = 1
+        char *s = b'{"doc": "doc0", "click": 0, "purchase": 0}'
+        json_object *doc_data = json_tokener_parse(s)
+        vector[float] X_r_vector = [0.5, 0.5, 0.5]
+        unordered_map[string, vector[float]] tmp_sigma_param
+        vector[float] expected
+        string query = b'query'
 
-    # tmp_vars = {
-        # 'alpha': 0.4,
-        # 'sigma': 0.4,
-    # }
-    # dbn_params = {
-        # 'query': {
-            # 'doc0': tmp_vars
-        # }
-    # }
-    # dbn_params['gamma'] = 0.7
+    model.alpha_params = alpha_params[0]
+    model.sigma_params = sigma_params[0]
+    model.gamma_param = gamma_param[0]
 
-    # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0.6)
+    tmp_sigma_param[b'doc0'] = [0, 0]
 
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0)
+    model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
 
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0)
+    expected = [0, 0]
+    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    s = b'{"doc": "doc0", "click": 1, "purchase": 0}'
+    doc_data = json_tokener_parse(s)
+
+    model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
+    expected = [0, 1]
+    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    r = 1
+    tmp_sigma_param[b'doc0'] = [0, 0]
+    model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
+    expected = [0.6060, 1]
+    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+
+cdef test_compute_factor_last_click_lower_than_r():
+    cdef:
+        float result
+        int r = 0
+        int last_r = 0
+        vector[float] cp_vector_given_e = [0.2]
+        vector[float] e_r_vector_given_CP = [0.4]
+        unordered_map[string, float] cr_dict
+        DBNModel model = DBNModel()
+        dbn_param alpha_params
+        dbn_param sigma_params
+        float gamma
+        string query = b'query'
+        bint click = False
+        bint purchase = True
+        string doc = b'doc0'
+        Factor factor
+
+    cr_dict[doc] = 0.1
+    alpha_params[query][doc] = 0.4
+    sigma_params[query][doc] = 0.4
+    gamma = 0.7
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0.6)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
-
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 0)
-    # assert_almost_equal(r, 0.02592)
-
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0.02016)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0.012096)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
+
+    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 0)
+    assert_almost_equal(result, 0.02592)
+
+    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0.02016)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0.01728)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0.012096)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0.00192)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0.008064)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0.01728)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0)
-
-
-# def test_compute_factor_last_click_higher_than_r():
-    # r = 0
-    # cp_array_given_e = array.array('f', [0.2])
-    # e_r_array_given_CP = array.array('f', [0.4])
-    # cr_dict = {'doc0': 0.1}
-    # last_r = 1
-    # model = DBNModel()
-
-    # dbn_params = {
-        # 'query': {
-            # 'doc0': {'alpha': 0.4, 'sigma': 0.4}
-        # }
-    # }
-    # dbn_params['gamma'] = 0.7
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0.00192)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0.008064)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0)
+
+
+cdef test_compute_factor_last_click_higher_than_r():
+    cdef:
+        float result
+        int r = 0
+        int last_r = 1
+        vector[float] cp_vector_given_e = [0.2]
+        vector[float] e_r_vector_given_CP = [0.4]
+        unordered_map[string, float] cr_dict
+        DBNModel model = DBNModel()
+        dbn_param alpha_params
+        dbn_param sigma_params
+        float gamma
+        string query = b'query'
+        bint click = False
+        bint purchase = True
+        string doc = b'doc0'
+        Factor factor
+
+    cr_dict[doc] = 0.1
+    alpha_params[query][doc] = 0.4
+    sigma_params[query][doc] = 0.4
+    gamma = 0.7
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(0, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0.02016)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0.012096)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 0, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0.02016)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0.012096)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 0)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 0, 1)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0.008064)
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0)
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-    # r = factor.compute_factor(1, 1, 1)
-    # assert_almost_equal(r, 0)
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 0)
+    assert_almost_equal(result, 0)
 
+    # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0)
 
-# def test_update_gamma():
-    # model = DBNModel()
-    # r = 0
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    # cp_array_given_e = array.array('f', [0.2])
-    # e_r_array_given_CP = array.array('f', [0.4])
-    # cr_dict = {'doc0': 0.1}
-    # last_r = 0
-    # tmp_vars = {
-        # 'doc0': {'alpha': [0, 0], 'sigma': [0, 0]},
-        # 'gamma': [0, 0]
-    # }
-    # dbn_params = {
-        # 'query': {
-            # 'doc0': {'alpha': 0.4, 'sigma': 0.4}
-        # }
-    # }
-    # dbn_params['gamma'] = 0.7
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0.008064)
 
-    # factor = Factor(
-        # r,
-        # last_r,
-        # doc_data['doc'],
-        # 'query',
-        # doc_data['click'],
-        # doc_data['purchase'],
-        # dbn_params,
-        # cr_dict[doc_data['doc']],
-        # e_r_array_given_CP,
-        # cp_array_given_e
-    # )
-
-    # ESS_den = 0
-    # for i in range(2):
-        # for j in range(2):
-            # for k in range(2):
-                # ESS_den += factor.compute_factor(i, j, k)
-
-    # ESS_0 = 0.02592 / ESS_den
-    # ESS_1 = 0.012096 / ESS_den
-
-    # model.update_gamma(r, last_r, doc_data, 'query', dbn_params, cp_array_given_e,
-                        # e_r_array_given_CP, cr_dict, tmp_vars)
-
-    # assert_almost_equal(tmp_vars['gamma'][0], ESS_1)
-    # assert_almost_equal(tmp_vars['gamma'][1], ESS_1 + ESS_0)
+    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(1, 1, 1)
+    assert_almost_equal(result, 0)
 
 
-# def test_update_dbn_params():
-    # tmp_vars = {
-        # 'doc0': {
-            # 'alpha': [1, 2],
-            # 'sigma': [1, 3]
-        # },
-        # 'gamma': [1, 10]
-    # }
-    # dbn_params = {
-        # 'query': {
-            # 'doc0': {}
-        # }
-    # }
-    # model = DBNModel()
-    # model.update_dbn_params('query', dbn_params, tmp_vars)
-    # assert dbn_params['gamma'] == 0.1
-    # assert dbn_params['query']['doc0']['alpha'] == 0.5
-    # assert dbn_params['query']['doc0']['sigma'] == 1. / 3
+cdef test_update_tmp_gamma():
+    cdef:
+        DBNModel model = DBNModel()
+        int r = 0
+        int last_r = 0
+        char *s = b'{"doc": "doc0", "click": 1, "purchase": 0}'
+        json_object *doc_data = json_tokener_parse(s)
+        vector[float] cp_vector_given_e = [0.2]
+        vector[float] e_r_vector_given_CP = [0.4]
+        unordered_map[string, float] cr_dict
+        vector[float] tmp_gamma_param
+        unordered_map[string, vector[float]] tmp_alpha_param
+        dbn_param alpha_params
+        dbn_param sigma_params
+        string query = b'query'
+        float ESS_den = 0
+        float ESS_0
+        float ESS_1
+        int i
+        int j
+        int k
+        bint click = True
+        bint purchase = False
+        float alpha = 0.4
+        float sigma = 0.4
+        float gamma = 0.7
+        float cr = 0.1
+
+    alpha_params[query][b'doc0'] = 0.4
+    sigma_params[query][b'doc0'] = 0.4
+    gamma = 0.7
+
+    model.alpha_params = alpha_params
+    model.sigma_params = sigma_params
+    model.gamma_param = gamma
+
+    cr_dict[b'doc0'] = 0.1
+    tmp_gamma_param = [0, 0]
+
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha,
+        sigma,
+        gamma,
+        cr,
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+
+    ESS_den = 0
+    for i in range(2):
+        for j in range(2):
+            for k in range(2):
+                ESS_den += factor.compute_factor(i, j, k)
+
+    ESS_0 = 0.02592 / ESS_den
+    ESS_1 = 0.012096 / ESS_den
+
+    model.update_tmp_gamma(r, last_r, doc_data, &query, &cp_vector_given_e,
+                       &e_r_vector_given_CP, &cr_dict, &tmp_gamma_param)
+
+    assert_almost_equal(tmp_gamma_param[0], ESS_1)
+    assert_almost_equal(tmp_gamma_param[1], ESS_1 + ESS_0)
+
+
+cdef test_update_alpha_params():
+    cdef:
+        DBNModel model = DBNModel()
+        unordered_map[string, vector[float]] tmp_alpha_param
+        string doc = b'doc0'
+        string query = b'query'
+
+    tmp_alpha_param[doc] = [1, 2]
+    model.update_alpha_param(&query, &tmp_alpha_param)
+    assert model.alpha_params[query][doc] == 0.5
+
+cdef test_update_sigma_params():
+    cdef:
+        DBNModel model = DBNModel()
+        unordered_map[string, vector[float]] tmp_sigma_param
+        string doc = b'doc0'
+        string query = b'query'
+
+    tmp_sigma_param[doc] = [1, 2]
+    model.update_sigma_param(&query, &tmp_sigma_param)
+    assert model.sigma_params[query][doc] == 0.5
+
+cdef test_update_gamma_param():
+    cdef:
+        DBNModel model = DBNModel()
+        vector[float] tmp_gamma_param
+
+    tmp_gamma_param = [1, 2]
+    model.update_gamma_param(&tmp_gamma_param)
+    assert model.gamma_param == 0.5
 
 
 test_get_search_context_string()
@@ -1258,10 +1438,12 @@ test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
 test_build_cp_p(&alpha_params)
 test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
 test_get_last_r()
-# test_update_alpha()
-# test_update_sigma()
-# test_compute_factor_last_click_lower_than_r()
-# test_compute_factor_last_click_higher_than_r()
-# test_update_gamma()
-# test_update_dbn_params()
-# test_fit()
+test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
+test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
+test_compute_factor_last_click_lower_than_r()
+test_compute_factor_last_click_higher_than_r()
+test_update_tmp_gamma()
+test_update_alpha_params()
+test_update_sigma_params()
+test_update_gamma_param()
+test_fit()

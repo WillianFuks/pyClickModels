@@ -1,3 +1,7 @@
+import os
+from glob import glob
+import gzip
+import time
 from libcpp.vector cimport vector
 from libcpp.unordered_map cimport unordered_map
 from libcpp.string cimport string
@@ -10,11 +14,123 @@ from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                   json_object_array_get_idx, json_object_get_int)
 
 
+cdef class Factor:
+    """
+    Helper class to implement the Factor component as discussed in:
+
+    https://clickmodels.weebly.com/uploads/5/2/2/5/52257029/mc2015-clickmodels.pdf
+
+    page 37 equation 4.43
+
+    Args
+    ----
+      r: int
+          Rank position in search results.
+      last_r: int
+          Last observed click or purchase from search results.
+      click: bint
+      purchase: bint
+      alpha: float
+          Updated values of alpha.
+      sigma: float
+          Updated values of sigma.
+      gamma: float
+          Updated value of gamma
+      cr: float
+          Conversion Rate of current document in session.
+      vector[float] e_r_vector_given_CP*
+          Probability that document at position r was examined (E_r=1) given clicks
+          and purchases.
+      vector[float] cp_vector_given_e*
+          Probability of observing Clicks and Purchases at positions greater than
+          r given that position r + 1 was examined.
+    """
+    # We use cinit instead of __cinit__ so we can send pointers as input.
+    cdef cinit(
+        self,
+        unsigned int r,
+        unsigned int last_r,
+        bint click,
+        bint purchase,
+        float alpha,
+        float sigma,
+        float gamma,
+        float cr,
+        vector[float] *e_r_vector_given_CP,
+        vector[float] *cp_vector_given_e
+    ):
+        self.r = r
+        self.last_r = last_r
+        self.alpha = alpha
+        self.sigma = sigma
+        self.gamma = gamma
+        self.click = <bint>click
+        self.purchase = <bint>purchase
+        self.cr = cr
+        self.e_r_vector_given_CP = e_r_vector_given_CP
+        self.cp_vector_given_e = cp_vector_given_e
+
+    cdef float compute_factor(self, bint x, bint y, bint z):
+        """
+        Responsible for computing the following equation:
+
+        P(E_r = x, S_r = y, E_{r+1} = z, C_{>=r+1}, P_{>=r+1} | C_{<r}, P_{<r})
+        """
+        cdef:
+            float result = 1
+        # Compute P(E_{r+1}=z, S_r=y, C_r=c_r, P_r=p_r | E_r=x)
+        if not x:
+            if z or y or self.click:
+                return 0
+        else:
+            if self.purchase:
+                if not y:
+                    return 0
+                else:
+                    if z:
+                        return 0
+                    else:
+                        result *= self.alpha * self.cr * (1 - self.gamma) * self.sigma
+            else:
+                if not self.click:
+                    if y:
+                        return 0
+                    else:
+                        result *= (1 - self.alpha) * (1 - self.sigma)
+                        if z:
+                            result *= self.gamma
+                        else:
+                            result *= (1 - self.gamma)
+                else:
+                    result *= self.alpha
+                    if not y:
+                        result *= (1 - self.sigma)
+                        if not z:
+                            result *= (1 - self.gamma) * (1 - self.cr)
+                        else:
+                            result *= self.gamma * (1 - self.cr)
+                    else:
+                        result *= self.sigma
+                        if not z:
+                            result *= (1 - self.gamma) * (1 - self.cr)
+                        else:
+                            result *= self.gamma * (1 - self.cr)
+        if not z:
+            if self.last_r >= self.r + 1:
+                return 0
+        else:
+            if self.r < self.cp_vector_given_e[0].size():
+                result *= self.cp_vector_given_e[0][self.r]
+        result *= (self.e_r_vector_given_CP[0][self.r] if x else
+                   1 - self.e_r_vector_given_CP[0][self.r])
+        return result
+
+
 cdef class DBNModel():
     def __cinit__(self):
         self.gamma_param = -1
 
-    cdef float *get_param(self, string param, string *query, string *doc,
+    cdef float *get_param(self, string param, string *query=NULL, string *doc=NULL,
                           int seed=0):
         """
         Gets the value of a specific parameter (can be either 'alpha', 'sigma' or
@@ -24,8 +140,8 @@ cdef class DBNModel():
         Args
         ----
           param: const char *
-              Either 'alpha' or 'sigma'
-          query: string
+              Either 'alpha' or 'sigma'.
+          query: string*
           seed: int
               Seed to set for generating random numbers. If 0 (zero) then builds it
               based on the `time` script from Cython Includes libc.
@@ -141,6 +257,7 @@ cdef class DBNModel():
             bint click
             bint purchase
             unsigned int i
+            unsigned int j
             vector[int] vec
             unordered_map[string, vector[int]] tmp_cr
             unordered_map[string, vector[int]].iterator it
@@ -189,9 +306,12 @@ cdef class DBNModel():
     ):
         """
         Computes the probability of each document in user session being examined.
+
         The equation implemented is:
+
         $P(E_{r+1}=1) = \\epsilon_r \\gamma \\left((1 - \\alpha_{uq}) +
             (1 - \\sigma_{uq})(1 - cr_{uq})\\alpha_{uq} \\right)$
+
         Args
         ----
           session: json_object *
@@ -237,7 +357,7 @@ cdef class DBNModel():
             doc = json_object_get_string(tmp)
             alpha = self.get_param(b'alpha', query, &doc)
             sigma = self.get_param(b'sigma', query, &doc)
-            gamma = self.get_param(b'gamma', query, &doc)
+            gamma = self.get_param(b'gamma')
             cr = dereference(cr_dict)[doc]
 
             e_r_next = (e_r_vector[r - 1] * gamma[0] * ((1 - sigma[0]) * (1 - cr) *
@@ -291,7 +411,7 @@ cdef class DBNModel():
             doc = json_object_get_string(tmp)
             alpha = self.get_param(b'alpha', query, &doc)
             sigma = self.get_param(b'sigma', query, &doc)
-            gamma = self.get_param(b'gamma', query, &doc)
+            gamma = self.get_param(b'gamma')
 
             X_r_1 = X_r_vector[r + 1]
             X_r = alpha[0] + (1 - alpha[0]) * gamma[0] * X_r_1
@@ -317,7 +437,8 @@ cdef class DBNModel():
         Returns
         -------
           e_r_vector_given_CP: vector[float]
-              Probability that document at position r was examined (E_r=1)
+              Probability that document at position r was examined (E_r=1) given clicks
+              and purchases.
         """
         cdef:
             size_t total_docs = json_object_array_length(session)
@@ -359,7 +480,7 @@ cdef class DBNModel():
 
             alpha = self.get_param(b'alpha', query, &doc)
             sigma = self.get_param(b'sigma', query, &doc)
-            gamma = self.get_param(b'gamma', query, &doc)
+            gamma = self.get_param(b'gamma')
 
             if purchase:
                 return e_r_vector_given_CP
@@ -532,3 +653,512 @@ cdef class DBNModel():
             if value == 1:
                 idx = r
         return idx
+
+    cdef void update_tmp_alpha(
+        self,
+        int r,
+        string *query,
+        json_object *doc_data,
+        vector[float] *e_r_vector,
+        vector[float] *X_r_vector,
+        int last_r,
+        unordered_map[string, vector[float]] *tmp_alpha_param
+    ):
+        """
+        Updates the parameter alpha (attractiveness) by running the EM Algorithm.
+
+        The equation for updating alpha is:
+
+        \\alpha_{uq}^{(t+1)} = \\frac{\\sum_{s \\in S_{uq}}\\left(c_r^{(s)} +
+          \\left(1 - c_r^{(s)}\\right)\\left(1 - c_{>r}^{(s)}\\right) \\cdot
+          \\frac{\\left(1 - \\epsilon_r^{(t)}\\right)\\alpha_{uq}^{(t)}}{\\left(1 -
+          \\epsilon_r^{(t)}X_r^{(t)} \\right)} \\right)}{|S_{uq}|}
+
+        Args
+        ----
+          r: int
+              Rank position.
+          query: string*
+          doc_data: json_object*
+              JSON object describing specific document from the search results page
+              in the clickstream of a specific user.
+          e_r_vector: vector[float]
+              Probability of Examination at position r.
+          X_r_vector: vector[float]
+              Probability of clicks at position greater than r given that position r
+              was Examined (E=1).
+          last_r: int
+              Last position r where click or purchase is observed.
+          tmp_alpha_param: unordered_map[string, vector[int]]
+              Holds temporary data for updating the alpha parameter.
+        """
+        cdef:
+            float *alpha
+            string doc
+            bint click
+            json_object *tmp
+
+        json_object_object_get_ex(doc_data, b'doc', &tmp)
+        doc = json_object_get_string(tmp)
+
+        json_object_object_get_ex(doc_data, b'click', &tmp)
+        click = <bint>json_object_get_int(tmp)
+
+        # doc not available yet.
+        if tmp_alpha_param[0].find(doc) == tmp_alpha_param[0].end():
+            tmp_alpha_param[0][doc] = vector[float](2)
+            tmp_alpha_param[0][doc][0] = 1
+            tmp_alpha_param[0][doc][1] = 2
+
+        if click:
+            tmp_alpha_param[0][doc][0] += 1
+        elif r > last_r:
+            alpha = self.get_param(b'alpha', query, &doc)
+
+            tmp_alpha_param[0][doc][0] += (
+                (1 - e_r_vector[0][r]) * alpha[0] /
+                 (1 - e_r_vector[0][r] * X_r_vector[0][r])
+            )
+        tmp_alpha_param[0][doc][1] += 1
+
+    cdef void update_tmp_sigma(
+        self,
+        string *query,
+        int r,
+        json_object *doc_data,
+        vector[float] *X_r_vector,
+        int last_r,
+        unordered_map[string, vector[float]] *tmp_sigma_param,
+    ):
+        """
+        Updates parameter sigma (satisfaction) by running the EM Algorithm.
+
+        The equation for updating sigma is:
+
+        \\sigma_{uq}^{(t+1)} = \\frac{\\sum_{s \\in S^{[1, 0]}}\\frac{(1 - c_r^{(t)})
+          (1-p_r^{(t)})\\sigma_{uq}^{(t)}}{(1 - X_{r+1}\\cdot (1-\\alpha_{uq}^{(t)})
+          \\gamma^{(t)})}}{|S^{[1, 0]}|}
+
+        Args
+        ----
+          query: string*
+          r: int
+              Rank position.
+          doc_data: json_object*
+              Clickstream data at position r.
+          X_r_vector: vector[float]
+              Probability of clicks at position greater than r given that position r
+              was Examined (E=1).
+          last_r: int
+              Last position r where click or purchase is observed.
+        """
+        cdef:
+            float *sigma
+            bint click
+            json_object *tmp
+            string doc
+
+        json_object_object_get_ex(doc_data, b'doc', &tmp)
+        doc = json_object_get_string(tmp)
+
+        json_object_object_get_ex(doc_data, b'click', &tmp)
+        click = <bint>json_object_get_int(tmp)
+
+        json_object_object_get_ex(doc_data, b'purchase', &tmp)
+        purchase = json_object_get_int(tmp)
+
+        # doc not available yet.
+        if tmp_sigma_param[0].find(doc) == tmp_sigma_param[0].end():
+            tmp_sigma_param[0][doc] = vector[float](2)
+            tmp_sigma_param[0][doc][0] = 1
+            tmp_sigma_param[0][doc][1] = 2
+
+        # satisfaction is only defined for ranks where click or purchase was observed.
+        if not click or purchase:
+            return
+
+        if r == last_r:
+            sigma = self.get_param(b'sigma', query, &doc)
+            gamma = self.get_param(b'gamma')
+
+            tmp_sigma_param[0][doc][0] += (
+                sigma[0] / (1 - (X_r_vector[0][r + 1] * (1 - sigma[0]) * gamma[0]))
+            )
+        tmp_sigma_param[0][doc][1] += 1
+
+
+    cdef void update_tmp_gamma(
+        self,
+        int r,
+        int last_r,
+        json_object *doc_data,
+        string *query,
+        vector[float] *cp_vector_given_e,
+        vector[float] *e_r_vector_given_CP,
+        unordered_map[string, float] *cr_dict,
+        vector[float] *tmp_gamma_param
+    ):
+        """
+        Updates the parameter gamma (persistence) by running the EM Algorithm.
+
+        The equations for this parameter are considerably more complex than for
+        parameters alpha and sigma. We use the Factor extension method to help out in
+        the computation.
+
+
+        Args
+        ----
+          r: int
+              Rank position.
+          last_r: int
+              Last rank where either click or purchase was observed.
+          doc_data: json_object*
+              JSON object with clickstream information of document at position r.
+          query: string*
+          cp_vector_given_e: vector[float]*
+              Probability of observing Clicks and Purchases at positions greater than
+              r given that position r + 1 was examined.
+          e_r_vector_given_CP: vector[float]*
+              Probability that document at position r was examined (E_r=1) given clicks
+              and purchases.
+          cr_dict: unordered_map[string, float]*
+              Conversion Rate of documents for respective query.
+          tmp_gamma_param: vector[float]*
+              Temporary updates for gamma.
+        """
+        cdef:
+            Factor factor
+            bint i = 0
+            bint j = 0
+            bint k = 0
+            float ESS_0 = 0
+            float ESS_1 = 0
+            float ESS_denominator = 0
+            float alpha
+            float sigma
+            float gamma
+            json_object *tmp
+            string doc
+            bint click
+            bint purchase
+            float cr
+
+        json_object_object_get_ex(doc_data, b'doc', &tmp)
+        doc = json_object_get_string(tmp)
+
+        json_object_object_get_ex(doc_data, b'click', &tmp)
+        click = json_object_get_int(tmp)
+
+        json_object_object_get_ex(doc_data, b'purchase', &tmp)
+        purchase = json_object_get_int(tmp)
+
+        alpha = self.get_param(b'gamma', query, &doc)[0]
+        sigma = self.get_param(b'sigma', query, &doc)[0]
+        gamma = self.get_param(b'gamma')[0]
+
+        cr = cr_dict[0][doc]
+
+        factor = Factor()
+        factor.cinit(
+            r,
+            last_r,
+            click,
+            purchase,
+            alpha,
+            sigma,
+            gamma,
+            cr,
+            e_r_vector_given_CP,
+            cp_vector_given_e
+        )
+        # Loop through all possible values of x, y and z, where each is an integer
+        # boolean.
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    ESS_denominator += factor.compute_factor(i, j, k)
+
+        ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
+        ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
+
+        tmp_gamma_param[0][0] += ESS_1
+        tmp_gamma_param[0][1] += ESS_0 + ESS_1
+
+
+    cdef void update_alpha_param(
+        self,
+        string *query,
+        unordered_map[string, vector[float]] *tmp_alpha_param,
+    ):
+        """
+        After all sessions for a given query have been analyzed, the new values of
+        alpha in `tmp_alpha_param` are copied into `alpha_params` where they'll
+        be used into new optimization iterations.
+
+        Args
+        ----
+          query: string*
+          tmp_alpha_param: unordered_map[string, vector[float]]
+              Optimized values for updating alpha
+        """
+        cdef:
+            unordered_map[string, vector[float]].iterator it = (
+            tmp_alpha_param[0].begin()
+        )
+            string doc
+            vector[float] value
+
+        while(it != tmp_alpha_param[0].end()):
+            doc = dereference(it).first
+            value = dereference(it).second
+            self.alpha_params[query[0]][doc] = value[0] / value[1]
+            postincrement(it)
+
+    cdef void update_sigma_param(
+        self,
+        string *query,
+        unordered_map[string, vector[float]] *tmp_sigma_param,
+    ):
+        """
+        After all sessions for a given query have been analyzed, the new values of
+        sigma in `tmp_sigma_param` are copied into `sigma_params` where they'll
+        be used into new optimization iterations.
+
+        Args
+        ----
+          query: string*
+          tmp_sigma_param: unordered_map[string, vector[float]]
+              Optimized values for updating sigma
+        """
+        cdef:
+            unordered_map[string, vector[float]].iterator it = (
+            tmp_sigma_param[0].begin()
+        )
+            string doc
+            vector[float] value
+
+        while(it != tmp_sigma_param[0].end()):
+            doc = dereference(it).first
+            value = dereference(it).second
+            self.sigma_params[query[0]][doc] = value[0] / value[1]
+            postincrement(it)
+
+    cdef void update_gamma_param(
+        self,
+        vector[float] *tmp_gamma_param
+    ):
+        """
+        After all sessions for a given query have been analyzed, the new value of
+        gamma in `tmp_sigma_param` is copied into `gamma_param` where they'll
+        be used into new optimization iterations.
+
+        Args
+        ----
+          tmp_gamma_param: vector[float]*
+              Optimized values for updating sigma
+        """
+        # We consider that a denominator of zero cannot happen.
+        self.gamma_param = tmp_gamma_param[0][0] / tmp_gamma_param[0][1]
+
+    cpdef void fit(self, str input_folder, int iters=30):
+        """
+        Reads through data of queries and customers sessions to find appropriate values
+        of `\\alpha_{uq}` (attractiveness), `\\sigma_{uq}` (satisfaction) and `\\gama`
+        (persistence) where `u` represents the document and `q` the input query.
+
+        Args
+        ----
+          input_folder: str
+              Path where gzipped clickstream files are located. Each file. Here's an
+              example of the expected input data on each compressed file:
+
+              `{
+                   "search_keys": {
+                       "search_term": "query",
+                      "key0": "value0"
+                   },
+                   "judgment_keys": [
+                       {
+                           "session": [
+                               {"click": 0, "purchase": 0, "doc": "document0"}
+                           ]
+                       }
+                   ]
+               }`
+
+              `search_keys` contains all keys that describe and are associated to the
+              search term as inserted by the user. `key0` for instance could mean any
+              further description of context such as the region of user, their
+              preferences among many possibilities.
+          iters: int
+              Total iterations the fitting method should run in the optimization
+              process. The implemented algorithm is Expectation-Maximization which means
+              the more iterations there are the more guaranteed it is values will
+              converge.
+        """
+        cdef:
+            list files = glob(os.path.join(input_folder, 'jud*'))
+            # row has to be bytes so Cython can interchange its value between char* and
+            # bytes
+            bytes row
+            json_object *row_json
+            json_object *search_keys
+            json_object *sessions
+            json_object *session
+            lh_table *search_keys_tbl
+            int c = 0
+            unsigned int i = 0
+            string query
+            unordered_map[string, vector[float]] tmp_alpha_param
+            unordered_map[string, vector[float]] tmp_sigma_param
+            vector[float] tmp_gamma_param = vector[float](2)
+            unordered_map[string, unordered_map[string, float]] cr_dict
+
+
+        for _ in range(iters):
+            print('starting iteration: ', _)
+            for file_ in files:
+                print('this is file_: ', file_)
+                for row in gzip.GzipFile(file_, 'rb'):
+
+                    # We start by erasing the temporary container of the parameters as
+                    # each new query requires a new computation in the EM algorithm.
+                    self.restart_tmp_params(&tmp_alpha_param, &tmp_sigma_param,
+                                            &tmp_gamma_param)
+                    print(str(c))
+                    c += 1
+                    t0 = time.time()
+
+                    row_json = json_tokener_parse(<char*>row)
+
+                    print('json row time: ', time.time() - t0)
+                    print('json: ', str(json_object_get_string(row_json)))
+                    t0 = time.time()
+
+                    json_object_object_get_ex(row_json, b'search_keys', &search_keys)
+                    search_keys_tbl = json_object_get_object(search_keys)
+
+                    query = self.get_search_context_string(search_keys_tbl)
+
+                    print('this is query: ', str(query))
+                    print('query time: ', time.time() - t0)
+
+                    json_object_object_get_ex(row_json, b'judgment_keys', &sessions)
+                    print('got judgment keys')
+                    self.compute_cr(&query, sessions, &cr_dict)
+                    print('now got cr')
+
+                    for i in range(json_object_array_length(sessions)):
+                        t0 = time.time()
+
+                        session = json_object_array_get_idx(sessions, i)
+
+                        self.update_tmp_params(session, &tmp_alpha_param,
+                                               &tmp_sigma_param, &tmp_gamma_param,
+                                               &query, &cr_dict[query])
+
+                        print('update_tmp_params time: ', time.time() - t0)
+                    t0 = time.time()
+
+                    self.update_alpha_param(&query, &tmp_alpha_param)
+                    self.update_sigma_param(&query, &tmp_sigma_param)
+                    self.update_gamma_param(&tmp_gamma_param)
+
+                    print('update dbn params time: ', time.time() - t0)
+
+
+    cdef void update_tmp_params(
+        self,
+        json_object *session,
+        unordered_map[string, vector[float]] *tmp_alpha_param,
+        unordered_map[string, vector[float]] *tmp_sigma_param,
+        vector[float] *tmp_gamma_param,
+        string *query,
+        unordered_map[string, float] *cr_dict
+    ):
+        """
+        For each session, applies the EM algorithm and save temporary results into
+        the tmp input parameters.
+
+        Args
+        ----
+          session: json_object*
+              JSON containing documents users observed on search results page and their
+              interaction with each item. Example:
+
+                `{"session": [
+                      {"doc": "doc0", "click": 0, "purchase": 0},
+                      {"doc": "doc1", "click": 1, "purchase": 1}
+                    ]
+                }`
+
+          tmp_alpha_param: vector[float]*
+              Holds temporary values for adapting each variable alpha.
+          tmp_sigma_param: vector[float]*
+              Holds temporary values for adapting each variable sigma.
+          tmp_gamma_param: vector[float]*
+              Holds temporary values for adapting gamma.
+          query: string*
+          cr_dict: unordered_map[string, float]*
+              Conversion Rates of each document for the current query.
+        """
+        cdef:
+            json_object *clickstream
+            json_object *doc_data
+            vector[float] e_r_vector
+            vector[float] X_r_vector
+            vector[float] e_r_vector_given_CP
+            vector[float] cp_vector_given_e
+            unsigned int last_r
+            unsigned int r
+
+        json_object_object_get_ex(session, b'session', &clickstream)
+        t0 = time.time()
+        e_r_vector = self.build_e_r_vector(clickstream, query, cr_dict)
+        print('e_r_vector time: ', time.time() - t0)
+        t0 = time.time()
+        X_r_vector = self.build_X_r_vector(session, query)
+        print('X_r_vector time: ', time.time() - t0)
+        t0 = time.time()
+        e_r_vector_given_CP = self.build_e_r_vector_given_CP(session, 0, query)
+        print('e_r_vector_given_CP time: ', time.time() - t0)
+        t0 = time.time()
+        cp_vector_given_e = self.build_CP_vector_given_e(session, query, cr_dict)
+        print('cp_vector_given_e time: ', time.time() - t0)
+        last_r = self.get_last_r(session)
+
+        for r in range(json_object_array_length(clickstream)):
+            t0 = time.time()
+            doc_data = json_object_array_get_idx(clickstream, r)
+            self.update_tmp_alpha(r, query, doc_data, &e_r_vector, &X_r_vector, last_r,
+                                  tmp_alpha_param)
+            print('update_alpha time: ', time.time() - t0)
+            t0 = time.time()
+            self.update_tmp_sigma(query, r, doc_data, &X_r_vector, last_r,
+                                  tmp_sigma_param)
+            print('update_sigma time: ', time.time() - t0)
+            t0 = time.time()
+            self.update_tmp_gamma(r, last_r, doc_data, query, &cp_vector_given_e,
+                                  &e_r_vector_given_CP, cr_dict, tmp_gamma_param)
+            print('update_gamma time: ', time.time() - t0)
+
+    cdef void restart_tmp_params(
+        self,
+        unordered_map[string, vector[float]] *tmp_alpha_param,
+        unordered_map[string, vector[float]] *tmp_sigma_param,
+        vector[float] *tmp_gamma_param
+    ):
+        """
+        Re-creates temporary parameters to be used in the optimization process for each
+        query and step.
+        """
+        tmp_alpha_param[0].erase(
+            tmp_alpha_param[0].begin(),
+            tmp_alpha_param[0].end()
+        )
+        tmp_sigma_param[0].erase(
+            tmp_sigma_param[0].begin(),
+            tmp_sigma_param[0].end()
+        )
+        tmp_gamma_param[0][0] = 1
+        tmp_gamma_param[0][1] = 2
