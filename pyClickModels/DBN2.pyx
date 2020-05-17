@@ -14,6 +14,12 @@ from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                   json_object_array_get_idx, json_object_get_int)
 
 
+# Start by setting the seed for the random values required for initalizing the DBN
+# parameters.
+SEED = ctime(NULL)
+srand(SEED)
+
+
 cdef class Factor:
     """
     Helper class to implement the Factor component as discussed in:
@@ -45,7 +51,7 @@ cdef class Factor:
           Probability of observing Clicks and Purchases at positions greater than
           r given that position r + 1 was examined.
     """
-    # We use cinit instead of __cinit__ so we can send pointers as input.
+    # Use cinit instead of __cinit__ so to send pointers as input.
     cdef cinit(
         self,
         unsigned int r,
@@ -130,8 +136,7 @@ cdef class DBNModel():
     def __cinit__(self):
         self.gamma_param = -1
 
-    cdef float *get_param(self, string param, string *query=NULL, string *doc=NULL,
-                          int seed=0):
+    cdef float *get_param(self, string param, string *query=NULL, string *doc=NULL):
         """
         Gets the value of a specific parameter (can be either 'alpha', 'sigma' or
         'gamma'in DBN setup) for specific query and document. If no such key exists,
@@ -146,16 +151,13 @@ cdef class DBNModel():
               Seed to set for generating random numbers. If 0 (zero) then builds it
               based on the `time` script from Cython Includes libc.
         """
-        cdef unordered_map[string, unordered_map[string, float]] *tmp
-
-        if not seed:
-            seed = ctime(NULL)
-        srand(seed)
+        cdef:
+            unordered_map[string, unordered_map[string, float]] *tmp
 
         if param == b'gamma':
             # if gamma=-1 then it hasn't been initialized yet
             if self.gamma_param == -1:
-                self.gamma_param = rand() / RAND_MAX
+                self.gamma_param = <float>rand() / RAND_MAX
             return &self.gamma_param
         elif param == b'alpha':
             tmp = &self.alpha_params
@@ -166,10 +168,10 @@ cdef class DBNModel():
         # query not in map
         if tmp[0].find(query[0]) == tmp[0].end():
             # using c rand function as it's ~ 15 - 30 times faster than Python's random
-            tmp[0][query[0]][doc[0]] = rand() / RAND_MAX
+            tmp[0][query[0]][doc[0]] = <float>rand() / RAND_MAX
         # query is in map but document is not
         elif tmp[0][query[0]].find(doc[0]) == tmp[0][query[0]].end():
-            tmp[0][query[0]][doc[0]] = rand() / RAND_MAX
+            tmp[0][query[0]][doc[0]] = <float>rand() / RAND_MAX
 
         return &tmp[0][query[0]][doc[0]]
 
@@ -214,7 +216,7 @@ cdef class DBNModel():
             k = <char *>entry.k
             v = <json_object *>entry.v
             # Stores keys and values separated by ":" and then by "|". This is done so
-            # we have a base vale for the input query as expressed by its complete
+            # there's a base vale for the input query as expressed by its complete
             # context (context here means possible keys that discriminate the search
             # such as the region of user, favorite brand, average ticket and so on.
             result = (
@@ -243,7 +245,7 @@ cdef class DBNModel():
         """
         # If query is already available on cr_dict then it's not required to be
         # processed again.
-        if cr_dict.find(query[0]) != cr_dict.end():
+        if cr_dict[0].find(query[0]) != cr_dict[0].end():
             return
 
         cdef:
@@ -251,7 +253,7 @@ cdef class DBNModel():
             size_t nclicks
             json_object *jso_session
             json_object *clickstream
-            json_object *jso_click
+            json_object *doc_data
             json_object *tmp_jso
             string doc
             bint click
@@ -270,15 +272,15 @@ cdef class DBNModel():
             nclicks = json_object_array_length(clickstream)
 
             for j in range(nclicks):
-                jso_click = json_object_array_get_idx(clickstream, i)
+                doc_data = json_object_array_get_idx(clickstream, j)
 
-                json_object_object_get_ex(jso_click, b'doc', &tmp_jso)
+                json_object_object_get_ex(doc_data, b'doc', &tmp_jso)
                 doc = <string>json_object_get_string(tmp_jso)
 
-                json_object_object_get_ex(jso_click, b'click', &tmp_jso)
+                json_object_object_get_ex(doc_data, b'click', &tmp_jso)
                 click = <bint>json_object_get_int(tmp_jso)
 
-                json_object_object_get_ex(jso_click, b'purchase', &tmp_jso)
+                json_object_object_get_ex(doc_data, b'purchase', &tmp_jso)
                 purchase = <bint>json_object_get_int(tmp_jso)
 
                 # First time seeing the document. Prepare a mapping to store total
@@ -286,6 +288,8 @@ cdef class DBNModel():
                 # across all sessions.
                 if tmp_cr.find(doc) == tmp_cr.end():
                     tmp_cr[doc] = vector[int](2)
+                    tmp_cr[doc][0] = 0
+                    tmp_cr[doc][1] = 0
 
                 if purchase:
                     tmp_cr[doc][0] += 1
@@ -294,13 +298,13 @@ cdef class DBNModel():
 
         it = tmp_cr.begin()
         while(it != tmp_cr.end()):
-            cr = dereference(it).second[0] / dereference(it).second[1]
-            dereference(cr_dict)[query[0]][dereference(it).first] = cr
+            cr = <float>dereference(it).second[0] / dereference(it).second[1]
+            cr_dict[0][query[0]][dereference(it).first] = cr
             postincrement(it)
 
     cdef vector[float] build_e_r_vector(
         self,
-        json_object *session,
+        json_object *clickstream,
         string *query,
         unordered_map[string, float] *cr_dict,
     ):
@@ -314,7 +318,7 @@ cdef class DBNModel():
 
         Args
         ----
-          session: json_object *
+          clickstream: json_object *
               JSON obect representing the user clickstream. Example:
                   [
                       {"doc": "doc0", "click": 0, "purchase": 0},
@@ -331,7 +335,7 @@ cdef class DBNModel():
               vector to receive final probabilities
         """
         cdef:
-            size_t total_docs = json_object_array_length(session)
+            size_t total_docs = json_object_array_length(clickstream)
             string doc
             unsigned int r
             json_object *tmp
@@ -340,17 +344,17 @@ cdef class DBNModel():
             float *gamma
             float cr
             float e_r_next
-            # we add +1 to total_docs to compute P(E_{r+1})
+            # Add +1 to total_docs to compute P(E_{r+1})
             vector[float] e_r_vector = vector[float](total_docs + 1)
 
         # Probability of Examination at r=0 (first document in search page results)
         # is always 100%
         e_r_vector[0] = 1
 
-        # we compute P(E_{r+1}) so we add +1 to the total docs
+        # Compute P(E_{r+1}) so add +1 to the total docs
         for r in range(1, total_docs + 1):
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r - 1),
+                json_object_array_get_idx(clickstream, r - 1),
                 b'doc',
                 &tmp
             )
@@ -365,7 +369,7 @@ cdef class DBNModel():
             e_r_vector[r] = e_r_next
         return e_r_vector
 
-    cdef vector[float] build_X_r_vector(self, json_object *session, string *query):
+    cdef vector[float] build_X_r_vector(self, json_object *clickstream, string *query):
         """
         X_r is given by P(C_{\\geq r} \\mid E_r=1). It extends for the probability of
         click on any rank starting from current until last one. This vector is also
@@ -381,15 +385,16 @@ cdef class DBNModel():
 
         Args
         ----
-          session: *json_object
+          clickstream: *json_object
               Session clickstream (clicks and purchases)
           query: *string
         """
         cdef:
-            size_t total_docs = json_object_array_length(session)
+            size_t total_docs = json_object_array_length(clickstream)
             unsigned int r
             string doc
-            # we add one to the length because of the zero value added
+            # Add one to the length because of the zero value added for position
+            # N + 1 where N is the amount of documents returned in the search page.
             vector[float] X_r_vector = vector[float](total_docs + 1)
             json_object *tmp
             float X_r_1
@@ -404,13 +409,12 @@ cdef class DBNModel():
 
         for r in range(total_docs - 1, -1, -1):
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'doc',
                 &tmp
             )
             doc = json_object_get_string(tmp)
             alpha = self.get_param(b'alpha', query, &doc)
-            sigma = self.get_param(b'sigma', query, &doc)
             gamma = self.get_param(b'gamma')
 
             X_r_1 = X_r_vector[r + 1]
@@ -418,7 +422,7 @@ cdef class DBNModel():
             X_r_vector[r]  = X_r
         return X_r_vector
 
-    cdef vector[float] build_e_r_vector_given_CP(self, json_object *session,
+    cdef vector[float] build_e_r_vector_given_CP(self, json_object *clickstream,
                                                  unsigned int idx, string *query):
         """
         Computes the probability that a given document was examined given the array of
@@ -428,7 +432,7 @@ cdef class DBNModel():
 
         Args
         ----
-          session: *json_object
+          clickstream: *json_object
               Clickstream of user session
           idx: unsigned int
               Index from where to start slicing sessions
@@ -441,7 +445,7 @@ cdef class DBNModel():
               and purchases.
         """
         cdef:
-            size_t total_docs = json_object_array_length(session)
+            size_t total_docs = json_object_array_length(clickstream)
             unsigned int r
             string doc
             float *alpha
@@ -450,7 +454,7 @@ cdef class DBNModel():
             bint click
             bint purchase
             json_object *tmp
-            # position r + 1 will be required later on so we add +1 in computation
+            # position r + 1 will be required later so add +1 in computation
             vector[float] e_r_vector_given_CP = vector[float](total_docs + 1 - idx, 0.0)
 
         # First document has 100% of being Examined regardless of clicks or purchases.
@@ -458,21 +462,21 @@ cdef class DBNModel():
 
         for r in range(idx, total_docs):
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'doc',
                 &tmp
             )
             doc = json_object_get_string(tmp)
 
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'click',
                 &tmp
             )
             click = <bint>json_object_get_int(tmp)
 
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'purchase',
                 &tmp
             )
@@ -495,7 +499,7 @@ cdef class DBNModel():
 
     cdef float compute_cp_p(
         self,
-        json_object *session,
+        json_object *clickstream,
         unsigned int idx,
         string *query,
         vector[float] *e_r_array_given_CP,
@@ -529,7 +533,7 @@ cdef class DBNModel():
               greater than r given that r + 1 was examined.
         """
         cdef:
-            size_t total_docs = json_object_array_length(session)
+            size_t total_docs = json_object_array_length(clickstream)
             unsigned int r
             string doc
             float *alpha
@@ -540,21 +544,21 @@ cdef class DBNModel():
 
         for r in range(idx, total_docs):
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'doc',
                 &tmp
             )
             doc = json_object_get_string(tmp)
 
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'click',
                 &tmp
             )
             click = <bint>json_object_get_int(tmp)
 
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 b'purchase',
                 &tmp
             )
@@ -562,7 +566,7 @@ cdef class DBNModel():
 
             alpha = self.get_param(b'alpha', query, &doc)
 
-            # we subtract `idx` from `r` because the input `e_r_array_given_CP`
+            # Subtract `idx` from `r` because the input `e_r_array_given_CP`
             # should always be counted from the beginning (despite the slicing in
             # sessions, this variable should still be counted as if the new session
             # is not a slice of any sort).
@@ -578,7 +582,7 @@ cdef class DBNModel():
 
     cdef vector[float] build_CP_vector_given_e(
         self,
-        json_object *session,
+        json_object *clickstream,
         string *query,
         unordered_map[string, float] *cr_dict
     ):
@@ -592,7 +596,7 @@ cdef class DBNModel():
 
         Args
         ----
-          session: *json_object
+          clickstream: *json_object
               User clickstream
           query: *string
           cr_dict: *unordered_map[string, float]
@@ -606,18 +610,22 @@ cdef class DBNModel():
         """
         cdef:
             unsigned int r
-            size_t total_docs = json_object_array_length(session)
+            size_t total_docs = json_object_array_length(clickstream)
             vector[float] e_r_vector_given_CP
             vector[float] cp_vector_given_e = vector[float](total_docs - 1)
 
-        # Subtract 1 as we iterate up to E_{r+1} defined up to r - 1 document
+        # Subtract 1 as E_{r+1} is defined up to r - 1 documents
         for r in range(total_docs - 1):
-            e_r_vector_given_CP = self.build_e_r_vector_given_CP(session, r + 1, query)
-            cp_vector_given_e[r] = self.compute_cp_p(session, r + 1, query,
+
+            e_r_vector_given_CP = self.build_e_r_vector_given_CP(clickstream, r + 1,
+                                                                 query)
+
+            cp_vector_given_e[r] = self.compute_cp_p(clickstream, r + 1, query,
                                                      &e_r_vector_given_CP, cr_dict)
+
         return cp_vector_given_e
 
-    cdef int get_last_r(self, json_object *session, const char *event=b'click'):
+    cdef int get_last_r(self, json_object *clickstream, const char *event=b'click'):
         """
         Loops through all documents in session and find at which position the desired
         event happend. It can be either a 'click' or a 'purchase' (still, in DBN, if
@@ -638,19 +646,19 @@ cdef class DBNModel():
         """
         cdef:
             unsigned int r
-            size_t total_docs = json_object_array_length(session)
-            int idx = 0
+            size_t total_docs = json_object_array_length(clickstream)
+            unsigned int idx = 0
             json_object *tmp
             bint value
 
         for r in range(total_docs):
             json_object_object_get_ex(
-                json_object_array_get_idx(session, r),
+                json_object_array_get_idx(clickstream, r),
                 event,
                 &tmp
             )
             value = <bint>json_object_get_int(tmp)
-            if value == 1:
+            if value == True:
                 idx = r
         return idx
 
@@ -736,7 +744,7 @@ cdef class DBNModel():
         The equation for updating sigma is:
 
         \\sigma_{uq}^{(t+1)} = \\frac{\\sum_{s \\in S^{[1, 0]}}\\frac{(1 - c_r^{(t)})
-          (1-p_r^{(t)})\\sigma_{uq}^{(t)}}{(1 - X_{r+1}\\cdot (1-\\alpha_{uq}^{(t)})
+          (1-p_r^{(t)})\\sigma_{uq}^{(t)}}{(1 - X_{r+1}\\cdot (1-\\sigma_{uq}^{(t)})
           \\gamma^{(t)})}}{|S^{[1, 0]}|}
 
         Args
@@ -758,6 +766,9 @@ cdef class DBNModel():
             json_object *tmp
             string doc
 
+        if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
+            print()
+
         json_object_object_get_ex(doc_data, b'doc', &tmp)
         doc = json_object_get_string(tmp)
 
@@ -773,19 +784,27 @@ cdef class DBNModel():
             tmp_sigma_param[0][doc][0] = 1
             tmp_sigma_param[0][doc][1] = 2
 
-        # satisfaction is only defined for ranks where click or purchase was observed.
+        # satisfaction is only defined for ranks where click or no purchase were
+        # observed.
         if not click or purchase:
             return
 
         if r == last_r:
             sigma = self.get_param(b'sigma', query, &doc)
+            if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
+                print('current sigma: ', sigma[0])
+                print('X_r: ', X_r_vector[0])
             gamma = self.get_param(b'gamma')
 
             tmp_sigma_param[0][doc][0] += (
                 sigma[0] / (1 - (X_r_vector[0][r + 1] * (1 - sigma[0]) * gamma[0]))
             )
+            if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
+                print('tmp sigma param[0] ', tmp_sigma_param[0][doc][0])
         tmp_sigma_param[0][doc][1] += 1
 
+        if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
+            print('tmp sigma param[1] ', tmp_sigma_param[0][doc][1])
 
     cdef void update_tmp_gamma(
         self,
@@ -802,7 +821,7 @@ cdef class DBNModel():
         Updates the parameter gamma (persistence) by running the EM Algorithm.
 
         The equations for this parameter are considerably more complex than for
-        parameters alpha and sigma. We use the Factor extension method to help out in
+        parameters alpha and sigma. Using the Factor extension method to help out in
         the computation.
 
 
@@ -941,6 +960,14 @@ cdef class DBNModel():
             doc = dereference(it).first
             value = dereference(it).second
             self.sigma_params[query[0]][doc] = value[0] / value[1]
+
+            if (
+                query[0] == b'search_term:0|region:north|favorite_size:L' and
+                doc == b'0'
+            ):
+                print('UPDATED sigma: ', self.sigma_params[query[0]][doc])
+                print()
+
             postincrement(it)
 
     cdef void update_gamma_param(
@@ -957,7 +984,7 @@ cdef class DBNModel():
           tmp_gamma_param: vector[float]*
               Optimized values for updating sigma
         """
-        # We consider that a denominator of zero cannot happen.
+        # Considered that a denominator of zero cannot happen.
         self.gamma_param = tmp_gamma_param[0][0] / tmp_gamma_param[0][1]
 
     cpdef void fit(self, str input_folder, int iters=30):
@@ -1005,6 +1032,7 @@ cdef class DBNModel():
             json_object *search_keys
             json_object *sessions
             json_object *session
+            json_object *clickstream
             lh_table *search_keys_tbl
             int c = 0
             unsigned int i = 0
@@ -1014,62 +1042,40 @@ cdef class DBNModel():
             vector[float] tmp_gamma_param = vector[float](2)
             unordered_map[string, unordered_map[string, float]] cr_dict
 
-
         for _ in range(iters):
-            print('starting iteration: ', _)
+            print('running iteration: ', _)
             for file_ in files:
-                print('this is file_: ', file_)
                 for row in gzip.GzipFile(file_, 'rb'):
-
-                    # We start by erasing the temporary container of the parameters as
+                    # Start by erasing the temporary container of the parameters as
                     # each new query requires a new computation in the EM algorithm.
                     self.restart_tmp_params(&tmp_alpha_param, &tmp_sigma_param,
                                             &tmp_gamma_param)
-                    print(str(c))
-                    c += 1
-                    t0 = time.time()
 
                     row_json = json_tokener_parse(<char*>row)
-
-                    print('json row time: ', time.time() - t0)
-                    print('json: ', str(json_object_get_string(row_json)))
-                    t0 = time.time()
 
                     json_object_object_get_ex(row_json, b'search_keys', &search_keys)
                     search_keys_tbl = json_object_get_object(search_keys)
 
                     query = self.get_search_context_string(search_keys_tbl)
-
-                    print('this is query: ', str(query))
-                    print('query time: ', time.time() - t0)
-
                     json_object_object_get_ex(row_json, b'judgment_keys', &sessions)
-                    print('got judgment keys')
                     self.compute_cr(&query, sessions, &cr_dict)
-                    print('now got cr')
 
                     for i in range(json_object_array_length(sessions)):
-                        t0 = time.time()
-
                         session = json_object_array_get_idx(sessions, i)
+                        json_object_object_get_ex(session, b'session', &clickstream)
 
-                        self.update_tmp_params(session, &tmp_alpha_param,
+                        self.update_tmp_params(clickstream, &tmp_alpha_param,
                                                &tmp_sigma_param, &tmp_gamma_param,
                                                &query, &cr_dict[query])
-
-                        print('update_tmp_params time: ', time.time() - t0)
-                    t0 = time.time()
 
                     self.update_alpha_param(&query, &tmp_alpha_param)
                     self.update_sigma_param(&query, &tmp_sigma_param)
                     self.update_gamma_param(&tmp_gamma_param)
 
-                    print('update dbn params time: ', time.time() - t0)
-
 
     cdef void update_tmp_params(
         self,
-        json_object *session,
+        json_object *clickstream,
         unordered_map[string, vector[float]] *tmp_alpha_param,
         unordered_map[string, vector[float]] *tmp_sigma_param,
         vector[float] *tmp_gamma_param,
@@ -1082,15 +1088,14 @@ cdef class DBNModel():
 
         Args
         ----
-          session: json_object*
+          clickstream: json_object*
               JSON containing documents users observed on search results page and their
               interaction with each item. Example:
 
-                `{"session": [
+                `[
                       {"doc": "doc0", "click": 0, "purchase": 0},
                       {"doc": "doc1", "click": 1, "purchase": 1}
-                    ]
-                }`
+                ]`
 
           tmp_alpha_param: vector[float]*
               Holds temporary values for adapting each variable alpha.
@@ -1103,7 +1108,6 @@ cdef class DBNModel():
               Conversion Rates of each document for the current query.
         """
         cdef:
-            json_object *clickstream
             json_object *doc_data
             vector[float] e_r_vector
             vector[float] X_r_vector
@@ -1112,35 +1116,21 @@ cdef class DBNModel():
             unsigned int last_r
             unsigned int r
 
-        json_object_object_get_ex(session, b'session', &clickstream)
-        t0 = time.time()
         e_r_vector = self.build_e_r_vector(clickstream, query, cr_dict)
-        print('e_r_vector time: ', time.time() - t0)
-        t0 = time.time()
-        X_r_vector = self.build_X_r_vector(session, query)
-        print('X_r_vector time: ', time.time() - t0)
-        t0 = time.time()
-        e_r_vector_given_CP = self.build_e_r_vector_given_CP(session, 0, query)
-        print('e_r_vector_given_CP time: ', time.time() - t0)
-        t0 = time.time()
-        cp_vector_given_e = self.build_CP_vector_given_e(session, query, cr_dict)
-        print('cp_vector_given_e time: ', time.time() - t0)
-        last_r = self.get_last_r(session)
+        X_r_vector = self.build_X_r_vector(clickstream, query)
+        e_r_vector_given_CP = self.build_e_r_vector_given_CP(clickstream, 0, query)
+        cp_vector_given_e = self.build_CP_vector_given_e(clickstream, query, cr_dict)
+        # last clicked position
+        last_r = self.get_last_r(clickstream)
 
         for r in range(json_object_array_length(clickstream)):
-            t0 = time.time()
             doc_data = json_object_array_get_idx(clickstream, r)
             self.update_tmp_alpha(r, query, doc_data, &e_r_vector, &X_r_vector, last_r,
                                   tmp_alpha_param)
-            print('update_alpha time: ', time.time() - t0)
-            t0 = time.time()
             self.update_tmp_sigma(query, r, doc_data, &X_r_vector, last_r,
                                   tmp_sigma_param)
-            print('update_sigma time: ', time.time() - t0)
-            t0 = time.time()
             self.update_tmp_gamma(r, last_r, doc_data, query, &cp_vector_given_e,
                                   &e_r_vector_given_CP, cr_dict, tmp_gamma_param)
-            print('update_gamma time: ', time.time() - t0)
 
     cdef void restart_tmp_params(
         self,

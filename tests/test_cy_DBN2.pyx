@@ -1,7 +1,7 @@
 from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
-
+from cython.operator cimport dereference, postincrement
 from pyClickModels.DBN2 cimport DBNModel, Factor
 from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                  json_object_get_object, lh_table)
@@ -47,21 +47,47 @@ gamma_param = 0.7
 cdef test_fit():
     cdef:
         DBNModel model = DBNModel()
-    gamma, params, tmp_folder = build_DBN_test_data(users=1000, docs=10, queries=2)
+        unordered_map[string, unordered_map[string, float]].iterator it
+        string query
+        string doc
+    gamma, params, tmp_folder = build_DBN_test_data(users=10000, docs=10, queries=2)
 
-    model.fit(tmp_folder.name, iters=1)
-    print('model dbn[gamma]: ', model.dbn_params['gamma'])
+    print('expected value of sigma: ', params[0][0][1])
+
+    model.fit(tmp_folder.name, iters=20)
+    print('model gamma ', model.gamma_param)
     print('real gamma: ', gamma)
-    print('dbn keys: ', model.dbn_params.keys())
 
-    print('dbn_params[alpha] ', model.dbn_params['0_L_north']['0']['alpha'])
+    it = model.alpha_params.begin()
+    while(it != model.alpha_params.end()):
+        # prints keys
+        print(dereference(it).first)
+        postincrement(it)
+
+    print(
+        'model.alpha_params doc 0', model.alpha_params[
+        b'search_term:0|region:north|favorite_size:L'][b'0']
+    )
     print('params alpha ', params[0][0][0])
-    print('dbn_params[sigma]', model.dbn_params['0_L_north']['0']['sigma'])
+
+
+    print(
+        'model.sigma_params doc 0', model.sigma_params[
+        b'search_term:0|region:north|favorite_size:L'][b'0']
+    )
     print('params sigma ', params[0][0][1])
 
     assert_allclose(model.gamma_param, gamma, atol=.1)
-    assert_allclose(model.alpha_params[b'0_L_north'][b'0'], params[0][0][0], atol=.15)
-    assert_allclose(model.sigma_params[b'0_L_north'][b'0'], params[0][0][1], atol=.15)
+    assert_allclose(
+        model.alpha_params[b'search_term:0|region:north|favorite_size:L'][b'0'],
+        params[0][0][0],
+        atol=.15
+    )
+    assert_allclose(
+        model.sigma_params[b'search_term:0|region:north|favorite_size:L'][b'0'],
+        params[0][0][1],
+        atol=.15
+    )
 
 
 cdef bint test_get_search_context_string():
@@ -93,14 +119,37 @@ cdef test_compute_cr(const char *sessions):
 
     expected[query][b'doc0'] = <float>0
     expected[query][b'doc1'] = <float>0
+    expected[query][b'doc2'] = <float>1
 
     model.compute_cr(&query, jso_sessions, &cr_dict)
+
     assert expected == cr_dict
 
     # test if query is already available in cr_dict
     jso_sessions = json_tokener_parse(<const char *>'')
     model.compute_cr(&query, jso_sessions, &cr_dict)
     assert expected == cr_dict
+
+
+cdef test_get_param():
+    cdef:
+        string query = b'query'
+        string doc = b'doc0'
+        DBNModel model = DBNModel()
+        float result
+        float result2
+        float result3
+
+    result = model.get_param(b'alpha', &query, &doc)[0]
+    assert result > 0 and result < 1
+
+    model.alpha_params.erase(query)
+    result2 = model.get_param(b'alpha', &query, &doc)[0]
+    assert result2 > 0 and result2 < 1
+    assert result != result2
+
+    result3 = model.get_param(b'alpha', &query, &doc)[0]
+    assert result2 == result3
 
 
 cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -301,6 +350,18 @@ cdef test_get_last_r():
     session = json_tokener_parse(s)
     result = model.get_last_r(session)
     assert result == 2
+
+    s = (
+        b'[{"doc": "doc0", "click": 0, "purchase": 0},'
+        b'{"doc": "doc0", "click": 0, "purchase": 1},'
+        b'{"doc": "doc1", "click": 0, "purchase": 0},'
+        b'{"doc": "doc2", "click": 0, "purchase": 1}]'
+    )
+    session = json_tokener_parse(s)
+    result = model.get_last_r(session)
+    assert result == 0
+
+
 
 
 cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -1432,6 +1493,7 @@ cdef test_update_gamma_param():
 
 test_get_search_context_string()
 test_compute_cr(sessions)
+test_get_param()
 test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
 test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
 test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)

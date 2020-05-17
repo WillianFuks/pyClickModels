@@ -43,6 +43,15 @@ extras_require = {
     'testing': tests_require
 }
 
+compiler_directives = {
+    'language_level': '3',
+    'binding': False,
+    'boundscheck': False,
+    'wraparound': False,
+    'cdivision': True
+}
+
+
 packages = ['pyClickModels']
 
 setup(
@@ -57,7 +66,7 @@ setup(
     tests_require=tests_require,
     setup_requires=setup_requires,
     license='MIT',
-    ext_modules=cythonize(ext_modules, compiler_directives={'language_level': "3"}),
+    ext_modules=cythonize(ext_modules, compiler_directives=compiler_directives),
     cmdclass={'build_ext': build_ext},
     zip_safe=False
 )
