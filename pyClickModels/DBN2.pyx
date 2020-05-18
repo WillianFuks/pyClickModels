@@ -11,7 +11,8 @@ from cython.operator cimport dereference, postincrement
 from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
                                   json_object_object_get_ex, json_object_get_string,
                                   lh_table, lh_entry, json_object_array_length,
-                                  json_object_array_get_idx, json_object_get_int)
+                                  json_object_array_get_idx, json_object_get_int,
+                                  json_object_put)
 
 
 # Start by setting the seed for the random values required for initalizing the DBN
@@ -766,9 +767,6 @@ cdef class DBNModel():
             json_object *tmp
             string doc
 
-        if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
-            print()
-
         json_object_object_get_ex(doc_data, b'doc', &tmp)
         doc = json_object_get_string(tmp)
 
@@ -791,20 +789,12 @@ cdef class DBNModel():
 
         if r == last_r:
             sigma = self.get_param(b'sigma', query, &doc)
-            if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
-                print('current sigma: ', sigma[0])
-                print('X_r: ', X_r_vector[0])
             gamma = self.get_param(b'gamma')
 
             tmp_sigma_param[0][doc][0] += (
                 sigma[0] / (1 - (X_r_vector[0][r + 1] * (1 - sigma[0]) * gamma[0]))
             )
-            if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
-                print('tmp sigma param[0] ', tmp_sigma_param[0][doc][0])
         tmp_sigma_param[0][doc][1] += 1
-
-        if query[0] == b'search_term:0|region:north|favorite_size:L' and doc == b'0':
-            print('tmp sigma param[1] ', tmp_sigma_param[0][doc][1])
 
     cdef void update_tmp_gamma(
         self,
@@ -960,14 +950,6 @@ cdef class DBNModel():
             doc = dereference(it).first
             value = dereference(it).second
             self.sigma_params[query[0]][doc] = value[0] / value[1]
-
-            if (
-                query[0] == b'search_term:0|region:north|favorite_size:L' and
-                doc == b'0'
-            ):
-                print('UPDATED sigma: ', self.sigma_params[query[0]][doc])
-                print()
-
             postincrement(it)
 
     cdef void update_gamma_param(
@@ -1042,6 +1024,7 @@ cdef class DBNModel():
             vector[float] tmp_gamma_param = vector[float](2)
             unordered_map[string, unordered_map[string, float]] cr_dict
 
+
         for _ in range(iters):
             print('running iteration: ', _)
             for file_ in files:
@@ -1071,6 +1054,7 @@ cdef class DBNModel():
                     self.update_alpha_param(&query, &tmp_alpha_param)
                     self.update_sigma_param(&query, &tmp_sigma_param)
                     self.update_gamma_param(&tmp_gamma_param)
+                    json_object_put(row_json)
 
 
     cdef void update_tmp_params(

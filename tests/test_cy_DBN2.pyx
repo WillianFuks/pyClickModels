@@ -4,29 +4,12 @@ from libcpp.vector cimport vector
 from cython.operator cimport dereference, postincrement
 from pyClickModels.DBN2 cimport DBNModel, Factor
 from pyClickModels.jsonc cimport (json_object, json_tokener_parse,
-                                 json_object_get_object, lh_table)
+                                 json_object_get_object, lh_table, json_object_put)
 from .conftest import build_DBN_test_data
 from numpy.testing import assert_almost_equal, assert_allclose
 
 ctypedef unordered_map[string, unordered_map[string, float]] dbn_param
 
-cdef const char *sessions = b"""[
-    {
-        'session': [
-            {"doc": "doc0", "click": 0, "purchase": 0},
-            {"doc": "doc1", "click": 1, "purchase": 0},
-            {"doc": "doc2", "click": 1, "purchase": 1}
-        ]
-    },
-    {
-        'session': [
-            {"doc": "doc0", "click": 0, "purchase": 0},
-            {"doc": "doc1", "click": 1, "purchase": 0},
-        ]
-    },
-
-]
-"""
 
 cdef string query = b'query'
 cdef dbn_param alpha_params
@@ -50,32 +33,32 @@ cdef test_fit():
         unordered_map[string, unordered_map[string, float]].iterator it
         string query
         string doc
-    gamma, params, tmp_folder = build_DBN_test_data(users=10000, docs=10, queries=2)
+    gamma, params, tmp_folder = build_DBN_test_data(users=30000, docs=8, queries=2)
 
-    print('expected value of sigma: ', params[0][0][1])
+    # print('expected value of sigma: ', params[0][0][1])
 
-    model.fit(tmp_folder.name, iters=20)
-    print('model gamma ', model.gamma_param)
-    print('real gamma: ', gamma)
+    model.fit(tmp_folder.name, iters=10)
+    # print('model gamma ', model.gamma_param)
+    # print('real gamma: ', gamma)
 
-    it = model.alpha_params.begin()
-    while(it != model.alpha_params.end()):
+    # it = model.alpha_params.begin()
+    # while(it != model.alpha_params.end()):
         # prints keys
-        print(dereference(it).first)
-        postincrement(it)
+        # print(dereference(it).first)
+        # postincrement(it)
 
-    print(
-        'model.alpha_params doc 0', model.alpha_params[
-        b'search_term:0|region:north|favorite_size:L'][b'0']
-    )
-    print('params alpha ', params[0][0][0])
+#     print(
+        # 'model.alpha_params doc 0', model.alpha_params[
+        # b'search_term:0|region:north|favorite_size:L'][b'0']
+    # )
+    # print('params alpha ', params[0][0][0])
 
 
-    print(
-        'model.sigma_params doc 0', model.sigma_params[
-        b'search_term:0|region:north|favorite_size:L'][b'0']
-    )
-    print('params sigma ', params[0][0][1])
+    # print(
+        # 'model.sigma_params doc 0', model.sigma_params[
+        # b'search_term:0|region:north|favorite_size:L'][b'0']
+    # )
+    # print('params sigma ', params[0][0][1])
 
     assert_allclose(model.gamma_param, gamma, atol=.1)
     assert_allclose(
@@ -107,15 +90,35 @@ cdef bint test_get_search_context_string():
     result = model.get_search_context_string(tbl)
     assert result == b'search_term:query|key0:value0|key1:value1'
 
+    json_object_put(search_keys)
 
-cdef test_compute_cr(const char *sessions):
+
+cdef test_compute_cr():
     cdef:
         DBNModel model = DBNModel()
         string query = b'query'
         # cr_dict is like: {'query_term': {'doc0': 0.2, 'doc1: 0}}
         unordered_map[string, unordered_map[string, float]] cr_dict
-        json_object *jso_sessions = json_tokener_parse(sessions)
         unordered_map[string, unordered_map[string, float]] expected
+        const char *sessions = b"""
+        [
+            {
+                'session': [
+                    {"doc": "doc0", "click": 0, "purchase": 0},
+                    {"doc": "doc1", "click": 1, "purchase": 0},
+                    {"doc": "doc2", "click": 1, "purchase": 1}
+                ]
+            },
+            {
+                'session': [
+                    {"doc": "doc0", "click": 0, "purchase": 0},
+                    {"doc": "doc1", "click": 1, "purchase": 0},
+                ]
+            },
+        ]
+        """
+        json_object *jso_sessions = json_tokener_parse(sessions)
+
 
     expected[query][b'doc0'] = <float>0
     expected[query][b'doc1'] = <float>0
@@ -129,6 +132,8 @@ cdef test_compute_cr(const char *sessions):
     jso_sessions = json_tokener_parse(<const char *>'')
     model.compute_cr(&query, jso_sessions, &cr_dict)
     assert expected == cr_dict
+
+    json_object_put(jso_sessions)
 
 
 cdef test_get_param():
@@ -178,6 +183,8 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     result = model.build_e_r_vector(session, &query, &cr_dict)
     assert_almost_equal(result, expected, decimal=4)
 
+    json_object_put(session)
+
 
 cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
                          float *gamma_param):
@@ -200,6 +207,8 @@ cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
 
     result = model.build_X_r_vector(session, &query)
     assert_almost_equal(result, expected, decimal=4)
+
+    json_object_put(session)
 
 
 cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -250,6 +259,8 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
     expected = [1, 0.7]
     assert_almost_equal(result, expected, decimal=4)
 
+    json_object_put(session)
+
 
 cdef test_build_cp_p(dbn_param *alpha_params):
     cdef:
@@ -278,6 +289,8 @@ cdef test_build_cp_p(dbn_param *alpha_params):
     expected = 0.0375
     result = model.compute_cp_p(session, 1, &query, &e_r_vector_given_CP, &cr_dict)
     assert_almost_equal(result, expected, decimal=6)
+
+    json_object_put(session)
 
 
 cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_params,
@@ -327,6 +340,8 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
     expected = [0.2062, 0.5]
     assert_almost_equal(result, expected, decimal=4)
 
+    json_object_put(session)
+
 
 cdef test_get_last_r():
     cdef:
@@ -361,11 +376,11 @@ cdef test_get_last_r():
     result = model.get_last_r(session)
     assert result == 0
 
-
+    json_object_put(session)
 
 
 cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
-                       float *gamma_param):
+                           float *gamma_param):
     cdef:
         DBNModel model = DBNModel()
         unsigned int r = 0
@@ -412,9 +427,11 @@ cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
     expected = [0.0, 1]
     assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
 
+    json_object_put(doc_data)
+
 
 cdef test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
-                       float *gamma_param):
+                           float *gamma_param):
     cdef:
         DBNModel model = DBNModel()
         unsigned int r = 0
@@ -449,6 +466,8 @@ cdef test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
     model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
     expected = [0.6060, 1]
     assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    json_object_put(doc_data)
 
 
 cdef test_compute_factor_last_click_lower_than_r():
@@ -1458,6 +1477,8 @@ cdef test_update_tmp_gamma():
     assert_almost_equal(tmp_gamma_param[0], ESS_1)
     assert_almost_equal(tmp_gamma_param[1], ESS_1 + ESS_0)
 
+    json_object_put(doc_data)
+
 
 cdef test_update_alpha_params():
     cdef:
@@ -1492,7 +1513,7 @@ cdef test_update_gamma_param():
 
 
 test_get_search_context_string()
-test_compute_cr(sessions)
+test_compute_cr()
 test_get_param()
 test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
 test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
