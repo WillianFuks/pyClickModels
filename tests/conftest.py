@@ -1,8 +1,9 @@
-import pytest
 import gzip
 import json
 import tempfile
+
 import numpy as np
+import pytest
 
 
 @pytest.mark.slow

@@ -1,0 +1,11 @@
+[run]
+plugins = Cython.Coverage
+include =
+    pyClickModels/*
+omit =
+    tests/*
+    pyClickModels/__version__.py
+
+[report]
+show_missing = true
+omit = *test_*
