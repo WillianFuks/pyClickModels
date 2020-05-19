@@ -21,5 +21,3 @@ coverage-html:
 
 test:
 	python setup.py test
-
-

@@ -4,6 +4,7 @@ import os
 from glob import glob
 import gzip
 import time
+import ujson
 from libcpp.vector cimport vector
 from libcpp.unordered_map cimport unordered_map
 from libcpp.string cimport string
@@ -242,9 +243,9 @@ cdef class DBNModel():
           sessions: *json_object
               List of session ids where each session contains all documents a given user
               interacted with along with clicks and purchases
-          cr_dict: multiprocessing.Manager
-              ProxyDict with queries as keys and values as another dict whose keys are
-              documents and values are the conversion rate.
+          cr_dict: unordered_map[string, float]]
+              Map of documents and their respective conversion rates for each specific
+              query.
         """
         # If query is already available on cr_dict then it's not required to be
         # processed again.
@@ -969,6 +970,54 @@ cdef class DBNModel():
         """
         # Considered that a denominator of zero cannot happen.
         self.gamma_param = tmp_gamma_param[0][0] / tmp_gamma_param[0][1]
+
+    cpdef void export_judgments(self, str output, str format_='NEWLINE_JSON'):
+        """
+        After running the fit optimization process, exports judgment results to an
+        external file in accordance to the selected input `format_`. Judgments are
+        computed as:
+
+            J_{uq} = P(\\alpha_{uq}) \\cdot P(\\sigma_{uq})
+
+        where `u` represents the document and `q` the query.
+
+        Args
+        ----
+          output: str
+              Filepath where to save results. If `gz` is present in `output` then
+              compresses file.
+          format_: str
+              Sets how to write result file. Options includes:
+               - NEWLINE_JSON: writes in JSON format, like:
+               {'query0': {'doc0': 0.3, 'doc1': 0.2}}
+               {'query1': {'doc0': 0.76, 'doc1': 0.41}}
+        """
+        cdef:
+            unordered_map[string, unordered_map[string, float]].iterator it
+            unordered_map[string, float].iterator doc_it
+            string query
+            string doc
+            float alpha
+            float sigma
+            dict tmp
+
+        file_manager = gzip.GzipFile if '.gz' in output else open
+
+        with file_manager(output, 'wb') as f:
+            it = self.alpha_params.begin()
+            while(it != self.alpha_params.end()):
+                query = dereference(it).first
+                tmp = {}
+                tmp[query] = {}
+                doc_it = self.alpha_params[query].begin()
+                while(doc_it != self.alpha_params[query].end()):
+                    doc = dereference(doc_it).first
+                    alpha = dereference(doc_it).second
+                    sigma = self.sigma_params[query][doc]
+                    tmp[query][doc] = alpha * sigma
+                    postincrement(doc_it)
+                f.write(ujson.dumps(tmp).encode() + '\n'.encode())
+                postincrement(it)
 
     cpdef void fit(self, str input_folder, int iters=30):
         """

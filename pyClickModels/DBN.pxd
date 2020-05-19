@@ -7,6 +7,7 @@ from pyClickModels.jsonc cimport *
 
 cdef class DBNModel:
     cpdef void fit(self, str input_folder, int iters=*)
+    cpdef void export_judgments(self, str output, str format_=*)
     cdef:
         float gamma_param
         unordered_map[string, unordered_map[string, float]] alpha_params
@@ -28,7 +29,6 @@ cdef class DBNModel:
         void update_gamma_param(self, vector[float] *tmp_gamma_param)
         void update_tmp_params(self, json_object *session, unordered_map[string, vector[float]] *tmp_alpha_param, unordered_map[string, vector[float]] *tmp_sigma_param, vector[float] *tmp_gamma_param, string *query, unordered_map[string, float] *cr_dict)
         void restart_tmp_params(self, unordered_map[string, vector[float]] *tmp_alpha_param, unordered_map[string, vector[float]] *tmp_sigma_param, vector[float] *tmp_gamma_param)
-
 
 cdef class Factor:
     cdef:

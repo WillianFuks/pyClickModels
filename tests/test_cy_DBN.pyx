@@ -1,3 +1,6 @@
+import tempfile
+import ujson
+import gzip
 from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
@@ -1511,6 +1514,57 @@ cdef test_update_gamma_param():
     model.update_gamma_param(&tmp_gamma_param)
     assert model.gamma_param == 0.5
 
+cdef test_export_judgments():
+
+    cdef:
+        DBNModel model = DBNModel()
+        dbn_param alpha_params
+        dbn_param sigma_params
+
+    alpha_params[b'query0'][b'doc0'] = 0.3
+    alpha_params[b'query0'][b'doc1'] = 0.4
+    alpha_params[b'query0'][b'doc2'] = 0.5
+    alpha_params[b'query1'][b'doc0'] = 0.6
+
+    sigma_params[b'query0'][b'doc0'] = 0.3
+    sigma_params[b'query0'][b'doc1'] = 0.4
+    sigma_params[b'query0'][b'doc2'] = 0.5
+    sigma_params[b'query1'][b'doc0'] = 0.6
+
+    model.alpha_params = alpha_params
+    model.sigma_params = sigma_params
+
+    tmp_file = tempfile.NamedTemporaryFile()
+    model.export_judgments(tmp_file.name)
+    flag = False
+    for row in open(tmp_file.name):
+        result = ujson.loads(row)
+        if 'query1' in result:
+            assert_almost_equal(result['query1']['doc0'], 0.36)
+            flag = True
+        else:
+            assert_almost_equal(result['query0']['doc0'], 0.09)
+            assert_almost_equal(result['query0']['doc1'], 0.16)
+            assert_almost_equal(result['query0']['doc2'], 0.25)
+
+    assert flag
+
+    tmp_file = tempfile.NamedTemporaryFile()
+    filename = tmp_file.name + '.gz'
+    model.export_judgments(filename)
+    flag = False
+    for row in gzip.GzipFile(filename, 'rb'):
+        result = ujson.loads(row)
+        if 'query1' in result:
+            assert_almost_equal(result['query1']['doc0'], 0.36)
+            flag = True
+        else:
+            assert_almost_equal(result['query0']['doc0'], 0.09)
+            assert_almost_equal(result['query0']['doc1'], 0.16)
+            assert_almost_equal(result['query0']['doc2'], 0.25)
+
+    assert flag
+
 
 cpdef run_tests():
     test_get_search_context_string()
@@ -1530,7 +1584,8 @@ cpdef run_tests():
     test_update_alpha_params()
     test_update_sigma_params()
     test_update_gamma_param()
-    test_fit()
+    # test_fit()
+    test_export_judgments()
 
 if __name__ == '__main__':
     test_get_search_context_string()
@@ -1551,3 +1606,4 @@ if __name__ == '__main__':
     test_update_sigma_params()
     test_update_gamma_param()
     test_fit()
+    test_export_judgments()
