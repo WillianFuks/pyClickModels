@@ -21,11 +21,9 @@ install:
 
 script:
   - |
-    echo $TRAVIS_PYTHON_VERSION
     if [[ $TRAVIS_PYTHON_VERSION == 3.8 ]]; then
         make isort-check
         make flake8
-    else echo failed
     fi
     python setup.py test
 
@@ -34,5 +32,5 @@ after_success:
     echo $TRAVIS_PYTHON_VERSION
     if [[ $TRAVIS_PYTHON_VERSION == 3.8 ]]; then
         travis wait 30 python setup.py test --coverage=true
-        make coverage && coveralls
+        coveralls
     fi
