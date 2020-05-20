@@ -1546,7 +1546,6 @@ cdef test_export_judgments():
             assert_almost_equal(result['query0']['doc0'], 0.09)
             assert_almost_equal(result['query0']['doc1'], 0.16)
             assert_almost_equal(result['query0']['doc2'], 0.25)
-
     assert flag
 
     tmp_file = tempfile.NamedTemporaryFile()
@@ -1562,7 +1561,6 @@ cdef test_export_judgments():
             assert_almost_equal(result['query0']['doc0'], 0.09)
             assert_almost_equal(result['query0']['doc1'], 0.16)
             assert_almost_equal(result['query0']['doc2'], 0.25)
-
     assert flag
 
 

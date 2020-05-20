@@ -77,7 +77,9 @@ ext_modules = [
 ]
 
 install_requires = [
-    'cython'
+    'cython',
+    'numpy',
+    'ujson'
 ]
 
 tests_require = [
