@@ -66,13 +66,17 @@ ext_modules = [
         language='c++',
         libraries=['json-c'],
         include_dirs=['pyClickModels'],
-        define_macros=define_macros
+        define_macros=define_macros,
+        extra_compile_args=["-std=c++11"],
+        extra_link_args=["-std=c++11"]
     ),
     Extension(
         'tests.test_cy_DBN',
         ['tests/test_cy_DBN.pyx'],
         language='c++',
         libraries=['json-c']
+        extra_compile_args=["-std=c++11"],
+        extra_link_args=["-std=c++11"]
     )
 ]
 
