@@ -18,7 +18,6 @@ addons:
 
 install:
   - pip install -U setuptools cython coveralls
-  - travis_wait mvn install
 
 script:
   - |
