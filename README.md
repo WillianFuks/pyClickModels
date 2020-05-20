@@ -98,4 +98,4 @@ Judgments here varies between 0 and 1. Some libraries requires it to range betwe
 
 ## Contributing
 
-Contributions are very welcome! Also, if you find bugs, please report them.
+Contributions are very welcome! Also, if you find bugs, please report them :).
