@@ -24,6 +24,12 @@ SEED = ctime(NULL)
 srand(SEED)
 
 
+
+
+
+
+
+
 cdef class Factor:
     """
     Helper class to implement the Factor component as discussed in:
