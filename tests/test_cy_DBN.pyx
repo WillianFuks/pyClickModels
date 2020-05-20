@@ -42,7 +42,7 @@ cdef test_fit():
 
     # print('expected value of sigma: ', params[0][0][1])
 
-    model.fit(tmp_folder.name, iters=10)
+    model.fit(tmp_folder.name, iters=8)
     # print('model gamma ', model.gamma_param)
     # print('real gamma: ', gamma)
 
