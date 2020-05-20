@@ -38,7 +38,7 @@ cdef test_fit():
         string query
         string doc
 
-    gamma, params, tmp_folder = build_DBN_test_data(users=30000, docs=8, queries=2)
+    gamma, params, tmp_folder = build_DBN_test_data(users=30000, docs=6, queries=2)
 
     # print('expected value of sigma: ', params[0][0][1])
 
