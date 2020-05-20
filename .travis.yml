@@ -7,7 +7,7 @@ matrix:
     - python: 3.8
 
 install:
-  - pip install -U setuptools coveralls
+  - pip install -U setuptools cython coveralls
 
 script:
   - |
