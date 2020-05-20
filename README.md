@@ -76,9 +76,9 @@ As for the `judgment_keys`, this is a list of sessions. The key `session` is man
 For running DBN from pyClickModels, here's a simple example:
 
 ```python
-from pyClickModels.DBN import DBNModel
+from pyClickModels.DBN import DBN
 
-model = DBNModel()
+model = DBN()
 model.fit(input_folder="/tmp/clicks_data/", iters=10)
 model.export_judgments("/tmp/output.gz")
 ```
