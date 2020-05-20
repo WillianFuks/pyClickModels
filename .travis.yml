@@ -11,6 +11,10 @@ before_install:
 addons:
   apt:
     update: true
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-7
 
 install:
   - pip install -U setuptools cython coveralls
