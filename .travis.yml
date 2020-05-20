@@ -10,14 +10,9 @@ install:
   - pip install -U setuptools coveralls
 
 script:
-  - if [ $TRAVIS_PYTHON_VERSION == 3.8 ];
-        then
-            make isort-check;
-            make flake8;
-    fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 3.8 ]]; then make isort-check; make flake8; fi
+    python setup.py test
+
 after_success:
   - |
-    if [ $TRAVIS_PYTHON_VERSION == 3.8 ];
-        then
-            make coverage && coveralls;
-    fi
+    if [[ $TRAVIS_PYTHON_VERSION == 3.8 ]]; then make coverage && coveralls; fi
