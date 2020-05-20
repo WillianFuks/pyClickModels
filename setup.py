@@ -74,7 +74,7 @@ ext_modules = [
         'tests.test_cy_DBN',
         ['tests/test_cy_DBN.pyx'],
         language='c++',
-        libraries=['json-c']
+        libraries=['json-c'],
         extra_compile_args=["-std=c++11"],
         extra_link_args=["-std=c++11"]
     )
