@@ -135,8 +135,10 @@ cdef class Factor:
                    1 - self.e_r_vector_given_CP[0][self.r])
         return result
 
-cpdef DBN():
+
+cpdef DBN():  # pragma: no cover
     return DBNModel()
+
 
 cdef class DBNModel():
     def __cinit__(self):
