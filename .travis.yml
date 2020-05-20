@@ -21,6 +21,7 @@ install:
 
 script:
   - |
+    echo $TRAVIS_PYTHON_VERSION
     if [[ $TRAVIS_PYTHON_VERSION == '3.8' ]]; then
         make isort-check
         make flake8
@@ -29,6 +30,7 @@ script:
 
 after_success:
   - |
+    echo $TRAVIS_PYTHON_VERSION
     if [[ $TRAVIS_PYTHON_VERSION == '3.8' ]]; then
         echo im here
         make coverage && coveralls
