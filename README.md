@@ -18,7 +18,7 @@ Main differences are:
 2. **Memory Friendly**: expects input data to follow a JSON format with all sessions of clickstream already expressed for each row. This saves memory and allows for the library to process bigger amounts of data.
 3. **Purchase variable**: as businesses such as eCommerces can greately benefit from better understanding their search engine, this repository added the variable Purchase to further describe customers behaviors.
 
-The file [notebooks/dbn.ipynb](notebooks/dbn.ipynb) has a complete description of how the model has been implemented along with all the mathematics involved.
+The file [notebooks/DBN.ipynb](notebooks/DBN.ipynb) has a complete description of how the model has been implemented along with all the mathematics involved.
 
 
 
