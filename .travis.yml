@@ -31,6 +31,5 @@ after_success:
   - |
     echo $TRAVIS_PYTHON_VERSION
     if [[ $TRAVIS_PYTHON_VERSION == 3.8 ]]; then
-        travis wait 30 python setup.py test --coverage=true
-        coveralls
+        travis wait 30 python setup.py test --coverage=true && coveralls
     fi
