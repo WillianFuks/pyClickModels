@@ -1,4 +1,4 @@
-# pyClickModels
+# pyClickModels [![Build Status](https://travis-ci.org/WillianFuks/pyClickModels.svg?branch=master)](https://travis-ci.org/WillianFuks/pyClickModels) [![Coverage Status](https://coveralls.io/repos/github/WillianFuks/pyClickModels/badge.svg?branch=master)](https://coveralls.io/github/WillianFuks/pyClickModels?branch=master)
 
 A Cython implementation of [ClickModels](https://github.com/varepsilon/clickmodels) that uses Probabilistic Graphical Models to infer user behavior when interacting with Search Page Results (Ranking).
 
