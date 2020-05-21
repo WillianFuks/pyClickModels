@@ -8,4 +8,5 @@ omit =
 
 [report]
 show_missing = true
-omit = *test_*
+exclude_lines =
+    pragma: no cover
