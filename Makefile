@@ -1,4 +1,4 @@
-.PHONY: flake8 coverage coverage-html test
+.PHONY: flake8 coverage coverage-html test publish
 
 flake8:
 	pip install -U flake8
@@ -21,3 +21,13 @@ coverage-html:
 
 test:
 	python setup.py test
+
+publish:
+	pip install -U setuptools
+	pip install -U wheel
+	pip install 'twine>=1.5.0'
+	pip install auditwheel
+	sh ./scripts/build_wheels.sh
+	#twine upload --repository testpypi dist/*
+	twine upload dist/*
+	rm -fr build dist .egg *.egg-info

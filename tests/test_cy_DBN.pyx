@@ -31,51 +31,58 @@ sigma_params[query][b'doc2'] = 0.5
 gamma_param = 0.7
 
 
-cdef test_fit():
+cdef bint test_fit():
     cdef:
         DBNModel model = DBN()
         unordered_map[string, unordered_map[string, float]].iterator it
         string query
+        dict dquery
         string doc
 
     gamma, params, tmp_folder = build_DBN_test_data(users=30000, docs=6, queries=2)
 
     # print('expected value of sigma: ', params[0][0][1])
 
-    model.fit(tmp_folder.name, iters=8)
+    model.fit(tmp_folder.name, iters=10)
     # print('model gamma ', model.gamma_param)
     # print('real gamma: ', gamma)
 
     # it = model.alpha_params.begin()
-    # while(it != model.alpha_params.end()):
+    while(it != model.alpha_params.end()):
     #     prints keys
-    #     print(dereference(it).first)
-    #     postincrement(it)
+        # print(dereference(it).first)
+        query = (dereference(it).first)
+        dquery = extract_keys(query)
 
-    # print(
-    #     'model.alpha_params doc 0', model.alpha_params[
-    #     b'search_term:0|region:north|favorite_size:L'][b'0']
-    # )
-    # print('params alpha ', params[0][0][0])
+        if dquery == {'search_term': 0, 'region': 'north', 'favorite_size': 'L'}:
+            # print(
+                # 'model.alpha_params doc 0', model.alpha_params[
+                # b'search_term:0|region:north|favorite_size:L'][b'0']
+            # )
+            # print('params alpha ', params[0][0][0])
 
-    # print(
-    #     'model.sigma_params doc 0', model.sigma_params[
-    #     b'search_term:0|region:north|favorite_size:L'][b'0']
-    # )
-    # print('params sigma ', params[0][0][1])
+            # print(
+                # 'model.sigma_params doc 0', model.sigma_params[
+                # b'search_term:0|region:north|favorite_size:L'][b'0']
+            # )
+            # print('params sigma ', params[0][0][1])
 
-    assert_allclose(model.gamma_param, gamma, atol=.1)
-    assert_allclose(
-        model.alpha_params[b'search_term:0|region:north|favorite_size:L'][b'0'],
-        params[0][0][0],
-        atol=.15
-    )
-    assert_allclose(
-        model.sigma_params[b'search_term:0|region:north|favorite_size:L'][b'0'],
-        params[0][0][1],
-        atol=.15
-    )
+            try:
+                assert_allclose(model.gamma_param, gamma, atol=.1)
+                assert_allclose(
+                    model.alpha_params[query][b'0'], params[0][0][0], atol=.15
+                )
+                assert_allclose(
+                    model.sigma_params[query][b'0'], params[0][0][1], atol=.15
+                )
+            except AssertionError:
+                return False
 
+        postincrement(it)
+    return True
+
+cdef dict extract_keys(string result):
+    return dict(e.split(':') for e in str(bytes(result).decode()).split('|'))
 
 cdef bint test_get_search_context_string():
     cdef:
@@ -83,21 +90,29 @@ cdef bint test_get_search_context_string():
         json_object *search_keys = json_tokener_parse(b"{'search_term': 'query'}")
         lh_table *tbl = json_object_get_object(search_keys)
         string result = model.get_search_context_string(tbl)
-        string expected = b'search_term:query'
-    assert result == expected
+        dict expected = {'search_term': 'query'}
+        dict r = extract_keys(result)
+    if not r == expected:
+        return False
 
     search_keys = json_tokener_parse(
         b"{'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}"
     )
 
     tbl = json_object_get_object(search_keys)
+    # result is something like: b'search_term:query|key0:value0|key1:value1'
     result = model.get_search_context_string(tbl)
-    assert result == b'search_term:query|key0:value0|key1:value1'
+    r = extract_keys(result)
+    expected = {'search_term': 'query', 'key0': 'value0', 'key1': 'value1'}
+
+    if not r == expected:
+        return False
 
     json_object_put(search_keys)
+    return True
 
 
-cdef test_compute_cr():
+cdef bint test_compute_cr():
     cdef:
         DBNModel model = DBNModel()
         string query = b'query'
@@ -129,17 +144,20 @@ cdef test_compute_cr():
 
     model.compute_cr(&query, jso_sessions, &cr_dict)
 
-    assert expected == cr_dict
+    if not expected == cr_dict:
+        return False
 
     # test if query is already available in cr_dict
     jso_sessions = json_tokener_parse(<const char *>'')
     model.compute_cr(&query, jso_sessions, &cr_dict)
-    assert expected == cr_dict
+    if not expected == cr_dict:
+        return False
 
     json_object_put(jso_sessions)
+    return True
 
 
-cdef test_get_param():
+cdef bint test_get_param():
     cdef:
         string query = b'query'
         string doc = b'doc0'
@@ -149,19 +167,25 @@ cdef test_get_param():
         float result3
 
     result = model.get_param(b'alpha', &query, &doc)[0]
-    assert result > 0 and result < 1
+    if not result > 0 and result < 1:
+        return False
 
     model.alpha_params.erase(query)
     result2 = model.get_param(b'alpha', &query, &doc)[0]
-    assert result2 > 0 and result2 < 1
-    assert result != result2
+    if not(
+        result2 > 0 and result2 < 1
+        or result != result2
+    ):
+        return False
 
     result3 = model.get_param(b'alpha', &query, &doc)[0]
-    assert result2 == result3
+    if not result2 == result3:
+        return False
+    return True
 
 
-cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
-                           float *gamma_param):
+cdef bint test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
+                                float *gamma_param):
     cdef:
         const char *s = (
             b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -184,13 +208,17 @@ cdef test_build_e_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     model.gamma_param = gamma_param[0]
 
     result = model.build_e_r_vector(session, &query, &cr_dict)
-    assert_almost_equal(result, expected, decimal=4)
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
-                           float *gamma_param):
+cdef bint test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
+                                float *gamma_param):
     cdef:
         const char *s = (
             b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -209,13 +237,18 @@ cdef test_build_X_r_vector(dbn_param *alpha_params, dbn_param *sigma_params,
     model.gamma_param = gamma_param[0]
 
     result = model.build_X_r_vector(session, &query)
-    assert_almost_equal(result, expected, decimal=4)
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_params,
-                                    float *gamma_param):
+cdef bint test_build_e_r_vector_given_CP(dbn_param *alpha_params,
+                                         dbn_param *sigma_params,
+                                         float *gamma_param):
     cdef:
         char *s = (
             b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -233,15 +266,27 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
     model.gamma_param = gamma_param[0]
 
     result = model.build_e_r_vector_given_CP(session, 0, &query)
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     result = model.build_e_r_vector_given_CP(session, 1, &query)
     expected = [1, 0, 0]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     result = model.build_e_r_vector_given_CP(session, 2, &query)
     expected = [1, 0.7]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -252,20 +297,33 @@ cdef test_build_e_r_vector_given_CP(dbn_param *alpha_params, dbn_param *sigma_pa
     expected = [1, 0.7, 0.35, 0.1484]
 
     result = model.build_e_r_vector_given_CP(session, 0, &query)
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     result = model.build_e_r_vector_given_CP(session, 1, &query)
     expected = [1, 0.35, 0.148484]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     result = model.build_e_r_vector_given_CP(session, 2, &query)
     expected = [1, 0.7]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_build_cp_p(dbn_param *alpha_params):
+cdef bint test_build_cp_p(dbn_param *alpha_params):
     cdef:
         const char *s = (
             b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -287,17 +345,26 @@ cdef test_build_cp_p(dbn_param *alpha_params):
     model.alpha_params = alpha_params[0]
 
     result = model.compute_cp_p(session, 0, &query, &e_r_vector_given_CP, &cr_dict)
-    assert_almost_equal(result, expected, decimal=6)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     expected = 0.0375
     result = model.compute_cp_p(session, 1, &query, &e_r_vector_given_CP, &cr_dict)
-    assert_almost_equal(result, expected, decimal=6)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_params,
-                                  float *gamma_param):
+cdef bint test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_params,
+                                       float *gamma_param):
     cdef:
         char *s = (
             b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -319,7 +386,11 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
 
     result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.25]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -330,7 +401,11 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
 
     result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.021875, 0.25]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -341,12 +416,17 @@ cdef test_build_CP_vector_given_e(dbn_param *alpha_params, dbn_param *sigma_para
 
     result = model.build_CP_vector_given_e(session, &query, &cr_dict)
     expected = [0.2062, 0.5]
-    assert_almost_equal(result, expected, decimal=4)
+
+    try:
+        assert_almost_equal(result, expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_get_last_r():
+cdef bint test_get_last_r():
     cdef:
         DBNModel model = DBNModel()
         char *s = (
@@ -357,7 +437,8 @@ cdef test_get_last_r():
         )
         json_object *session = json_tokener_parse(s)
         int result = model.get_last_r(session)
-    assert result == 3
+    if not result == 3:
+        return False
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -367,7 +448,8 @@ cdef test_get_last_r():
     )
     session = json_tokener_parse(s)
     result = model.get_last_r(session)
-    assert result == 2
+    if not result == 2:
+        return False
 
     s = (
         b'[{"doc": "doc0", "click": 0, "purchase": 0},'
@@ -377,13 +459,15 @@ cdef test_get_last_r():
     )
     session = json_tokener_parse(s)
     result = model.get_last_r(session)
-    assert result == 0
+    if not result == 0:
+        return False
 
     json_object_put(session)
+    return True
 
 
-cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
-                           float *gamma_param):
+cdef bint test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
+                                float *gamma_param):
     cdef:
         DBNModel model = DBNModel()
         unsigned int r = 0
@@ -404,7 +488,8 @@ cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
 
     model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
                            &tmp_alpha_param)
-    assert tmp_alpha_param[b'doc0'] == [1, 1]
+    if not tmp_alpha_param[b'doc0'] == [1, 1]:
+        return False
 
     r = 1
     last_r = 0
@@ -416,7 +501,11 @@ cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
     model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
                            &tmp_alpha_param)
     expected = [1. / 3, 1]
-    assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
+
+    try:
+        assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
+    except AssertionError:
+        return False
 
     r = 1
     last_r = 2
@@ -428,13 +517,18 @@ cdef test_update_tmp_alpha(dbn_param *alpha_params, dbn_param *sigma_params,
     model.update_tmp_alpha(r, &query, doc_data, &e_r_vector, &X_r_vector, last_r,
                            &tmp_alpha_param)
     expected = [0.0, 1]
-    assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
+
+    try:
+        assert_almost_equal(tmp_alpha_param[b'doc0'], expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(doc_data)
+    return True
 
 
-cdef test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
-                           float *gamma_param):
+cdef bint test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
+                                float *gamma_param):
     cdef:
         DBNModel model = DBNModel()
         unsigned int r = 0
@@ -455,25 +549,38 @@ cdef test_update_tmp_sigma(dbn_param *alpha_params, dbn_param *sigma_params,
     model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
 
     expected = [0, 0]
-    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    try:
+        assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+    except AssertionError:
+        return False
 
     s = b'{"doc": "doc0", "click": 1, "purchase": 0}'
     doc_data = json_tokener_parse(s)
 
     model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
     expected = [0, 1]
-    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    try:
+        assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+    except AssertionError:
+        return False
 
     r = 1
     tmp_sigma_param[b'doc0'] = [0, 0]
     model.update_tmp_sigma(&query, r, doc_data, &X_r_vector, last_r, &tmp_sigma_param)
     expected = [0.6060, 1]
-    assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+
+    try:
+        assert_almost_equal(tmp_sigma_param[b'doc0'], expected, decimal=4)
+    except AssertionError:
+        return False
 
     json_object_put(doc_data)
+    return True
 
 
-cdef test_compute_factor_last_click_lower_than_r():
+cdef bint test_compute_factor_last_click_lower_than_r():
     cdef:
         float result
         int r = 0
@@ -511,7 +618,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0.6)
+
+    try:
+        assert_almost_equal(result, 0.6)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -530,7 +641,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -549,7 +664,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = True
@@ -568,7 +687,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -587,7 +710,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -606,64 +733,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
 
-    # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
-    click = False
-    purchase = False
-    factor = Factor()
-    factor.cinit(
-        r,
-        last_r,
-        click,
-        purchase,
-        alpha_params[query][doc],
-        sigma_params[query][doc],
-        gamma,
-        cr_dict[doc],
-        &e_r_vector_given_CP,
-        &cp_vector_given_e
-    )
-    result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
-
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
-    click = True
-    purchase = False
-    factor = Factor()
-    factor.cinit(
-        r,
-        last_r,
-        click,
-        purchase,
-        alpha_params[query][doc],
-        sigma_params[query][doc],
-        gamma,
-        cr_dict[doc],
-        &e_r_vector_given_CP,
-        &cp_vector_given_e
-    )
-    result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
-
-    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
-    click = True
-    purchase = True
-    factor = Factor()
-    factor.cinit(
-        r,
-        last_r,
-        click,
-        purchase,
-        alpha_params[query][doc],
-        sigma_params[query][doc],
-        gamma,
-        cr_dict[doc],
-        &e_r_vector_given_CP,
-        &cp_vector_given_e
-    )
-    result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -681,8 +755,81 @@ cdef test_compute_factor_last_click_lower_than_r():
         &e_r_vector_given_CP,
         &cp_vector_given_e
     )
+    result = factor.compute_factor(0, 1, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
+
+    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
+    click = True
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
+
+    # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
+    click = True
+    purchase = True
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
+    result = factor.compute_factor(0, 1, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
+
+    # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
+    click = False
+    purchase = False
+    factor = Factor()
+    factor.cinit(
+        r,
+        last_r,
+        click,
+        purchase,
+        alpha_params[query][doc],
+        sigma_params[query][doc],
+        gamma,
+        cr_dict[doc],
+        &e_r_vector_given_CP,
+        &cp_vector_given_e
+    )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -701,7 +848,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -720,7 +871,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -739,7 +894,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 0)
-    assert_almost_equal(result, 0.02592)
+
+    try:
+        assert_almost_equal(result, 0.02592)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -758,7 +917,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -777,7 +940,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0.02016)
+
+    try:
+        assert_almost_equal(result, 0.02016)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -796,7 +963,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0.012096)
+
+    try:
+        assert_almost_equal(result, 0.012096)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -815,7 +986,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -834,7 +1009,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0.0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -853,7 +1032,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0.01728)
+
+    try:
+        assert_almost_equal(result, 0.01728)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -872,7 +1055,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0.00192)
+
+    try:
+        assert_almost_equal(result, 0.00192)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -891,7 +1078,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -910,7 +1101,11 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0.008064)
+
+    try:
+        assert_almost_equal(result, 0.008064)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -929,10 +1124,15 @@ cdef test_compute_factor_last_click_lower_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0)
 
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
-cdef test_compute_factor_last_click_higher_than_r():
+    return True
+
+cdef bint test_compute_factor_last_click_higher_than_r():
     cdef:
         float result
         int r = 0
@@ -972,7 +1172,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -991,7 +1195,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1010,7 +1218,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1029,7 +1241,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1048,7 +1264,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1067,7 +1287,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1086,7 +1310,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = False
@@ -1105,7 +1333,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1124,7 +1356,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1143,7 +1379,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1162,7 +1402,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1181,7 +1425,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(0, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1200,7 +1448,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1219,7 +1471,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1238,7 +1494,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1257,7 +1517,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0.02016)
+
+    try:
+        assert_almost_equal(result, 0.02016)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1276,7 +1540,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0.012096)
+
+    try:
+        assert_almost_equal(result, 0.012096)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1295,7 +1563,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 0, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1314,7 +1586,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1333,7 +1609,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1352,7 +1632,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 0)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 0, 'purchase': 0}
     click = False
@@ -1371,7 +1655,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 0}
     click = True
@@ -1390,7 +1678,11 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0.008064)
+
+    try:
+        assert_almost_equal(result, 0.008064)
+    except AssertionError:
+        return False
 
     # doc_data = {'doc': 'doc0', 'click': 1, 'purchase': 1}
     click = True
@@ -1409,10 +1701,16 @@ cdef test_compute_factor_last_click_higher_than_r():
         &cp_vector_given_e
     )
     result = factor.compute_factor(1, 1, 1)
-    assert_almost_equal(result, 0)
+
+    try:
+        assert_almost_equal(result, 0)
+    except AssertionError:
+        return False
+
+    return True
 
 
-cdef test_update_tmp_gamma():
+cdef bint test_update_tmp_gamma():
     cdef:
         DBNModel model = DBNModel()
         int r = 0
@@ -1477,13 +1775,17 @@ cdef test_update_tmp_gamma():
     model.update_tmp_gamma(r, last_r, doc_data, &query, &cp_vector_given_e,
                            &e_r_vector_given_CP, &cr_dict, &tmp_gamma_param)
 
-    assert_almost_equal(tmp_gamma_param[0], ESS_1)
-    assert_almost_equal(tmp_gamma_param[1], ESS_1 + ESS_0)
+    try:
+        assert_almost_equal(tmp_gamma_param[0], ESS_1)
+        assert_almost_equal(tmp_gamma_param[1], ESS_1 + ESS_0)
+    except AssertionError:
+        return False
 
     json_object_put(doc_data)
+    return True
 
 
-cdef test_update_alpha_params():
+cdef bint test_update_alpha_params():
     cdef:
         DBNModel model = DBNModel()
         unordered_map[string, vector[float]] tmp_alpha_param
@@ -1492,10 +1794,13 @@ cdef test_update_alpha_params():
 
     tmp_alpha_param[doc] = [1, 2]
     model.update_alpha_param(&query, &tmp_alpha_param)
-    assert model.alpha_params[query][doc] == 0.5
+    if not model.alpha_params[query][doc] == 0.5:
+        return False
+
+    return True
 
 
-cdef test_update_sigma_params():
+cdef bint test_update_sigma_params():
     cdef:
         DBNModel model = DBNModel()
         unordered_map[string, vector[float]] tmp_sigma_param
@@ -1504,20 +1809,25 @@ cdef test_update_sigma_params():
 
     tmp_sigma_param[doc] = [1, 2]
     model.update_sigma_param(&query, &tmp_sigma_param)
-    assert model.sigma_params[query][doc] == 0.5
+    if not model.sigma_params[query][doc] == 0.5:
+        return False
+
+    return True
 
 
-cdef test_update_gamma_param():
+cdef bint test_update_gamma_param():
     cdef:
         DBNModel model = DBNModel()
         vector[float] tmp_gamma_param
 
     tmp_gamma_param = [1, 2]
     model.update_gamma_param(&tmp_gamma_param)
-    assert model.gamma_param == 0.5
+    if not model.gamma_param == 0.5:
+        return False
 
-cdef test_export_judgments():
+    return True
 
+cdef bint test_export_judgments():
     cdef:
         DBNModel model = DBNModel()
         dbn_param alpha_params
@@ -1541,14 +1851,18 @@ cdef test_export_judgments():
     flag = False
     for row in open(tmp_file.name):
         result = ujson.loads(row)
-        if 'query1' in result:
-            assert_almost_equal(result['query1']['doc0'], 0.36)
-            flag = True
-        else:
-            assert_almost_equal(result['query0']['doc0'], 0.09)
-            assert_almost_equal(result['query0']['doc1'], 0.16)
-            assert_almost_equal(result['query0']['doc2'], 0.25)
-    assert flag
+        try:
+            if 'query1' in result:
+                assert_almost_equal(result['query1']['doc0'], 0.36)
+                flag = True
+            else:
+                assert_almost_equal(result['query0']['doc0'], 0.09)
+                assert_almost_equal(result['query0']['doc1'], 0.16)
+                assert_almost_equal(result['query0']['doc2'], 0.25)
+        except AssertionError:
+            return False
+    if not flag:
+        return False
 
     tmp_file = tempfile.NamedTemporaryFile()
     filename = tmp_file.name + '.gz'
@@ -1556,54 +1870,61 @@ cdef test_export_judgments():
     flag = False
     for row in gzip.GzipFile(filename, 'rb'):
         result = ujson.loads(row)
-        if 'query1' in result:
-            assert_almost_equal(result['query1']['doc0'], 0.36)
-            flag = True
-        else:
-            assert_almost_equal(result['query0']['doc0'], 0.09)
-            assert_almost_equal(result['query0']['doc1'], 0.16)
-            assert_almost_equal(result['query0']['doc2'], 0.25)
-    assert flag
+        try:
+            if 'query1' in result:
+                assert_almost_equal(result['query1']['doc0'], 0.36)
+                flag = True
+            else:
+                assert_almost_equal(result['query0']['doc0'], 0.09)
+                assert_almost_equal(result['query0']['doc1'], 0.16)
+                assert_almost_equal(result['query0']['doc2'], 0.25)
+        except AssertionError:
+            return False
+    if not flag:
+        return False
+
+    return True
 
 
 cpdef run_tests():
-    test_get_search_context_string()
-    test_compute_cr()
-    test_get_param()
-    test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
-    test_build_cp_p(&alpha_params)
-    test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
-    test_get_last_r()
-    test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
-    test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
-    test_compute_factor_last_click_lower_than_r()
-    test_compute_factor_last_click_higher_than_r()
-    test_update_tmp_gamma()
-    test_update_alpha_params()
-    test_update_sigma_params()
-    test_update_gamma_param()
-    test_fit()
-    test_export_judgments()
+    assert test_get_search_context_string()
+    assert test_compute_cr()
+    assert test_get_param()
+    assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_cp_p(&alpha_params)
+    assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
+    assert test_get_last_r()
+    assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
+    assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
+    assert test_compute_factor_last_click_lower_than_r()
+    assert test_compute_factor_last_click_higher_than_r()
+    assert test_update_tmp_gamma()
+    assert test_update_alpha_params()
+    assert test_update_sigma_params()
+    assert test_update_gamma_param()
+    assert test_fit()
+    assert test_export_judgments()
+
 
 if __name__ == '__main__':
-    test_get_search_context_string()
-    test_compute_cr()
-    test_get_param()
-    test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
-    test_build_cp_p(&alpha_params)
-    test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
-    test_get_last_r()
-    test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
-    test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
-    test_compute_factor_last_click_lower_than_r()
-    test_compute_factor_last_click_higher_than_r()
-    test_update_tmp_gamma()
-    test_update_alpha_params()
-    test_update_sigma_params()
-    test_update_gamma_param()
-    test_fit()
-    test_export_judgments()
+    assert test_get_search_context_string()
+    assert test_compute_cr()
+    assert test_get_param()
+    assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
+    assert test_build_cp_p(&alpha_params)
+    assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
+    assert test_get_last_r()
+    assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
+    assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
+    assert test_compute_factor_last_click_lower_than_r()
+    assert test_compute_factor_last_click_higher_than_r()
+    assert test_update_tmp_gamma()
+    assert test_update_alpha_params()
+    assert test_update_sigma_params()
+    assert test_update_gamma_param()
+    assert test_fit()
+    assert test_export_judgments()

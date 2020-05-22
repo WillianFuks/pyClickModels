@@ -133,3 +133,7 @@ dmypy.json
 
 # Cython annotations
 pyClickModels/*.html
+
+# json-c building folders
+json-c-build/
+json-c/
