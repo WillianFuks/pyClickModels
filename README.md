@@ -24,7 +24,7 @@ The file [notebooks/DBN.ipynb](notebooks/DBN.ipynb) has a complete description o
 
 ## Instalation
 
-As this project relies on binaries compiled by Cython, currently only CPython36 for Linux is supported. It can be installed with:
+As this project relies on binaries compiled by Cython, currently only Linux (manylinux) platform is supported. It can be installed with:
 
     pip install pyClickModels
 
