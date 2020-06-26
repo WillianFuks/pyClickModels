@@ -32,7 +32,7 @@ As this project relies on binaries compiled by Cython, currently only Linux (man
 
 ### Input Data
 
-pyClickModels expects input data to be stored in a set of compressed `gz` files located on the same folder.
+pyClickModels expects input data to be stored in a set of compressed `gz` files located on the same folder. They all should start with the string "judgments", for instance, `judgments0.gz`.
 Each file should contain line separated JSONs. The following is an example of each JSON line:
 
 ```json
@@ -86,8 +86,8 @@ model.export_judgments("/tmp/output.gz")
 Output file will contain a NEWLINE JSON separated file with the judgments for each query and each document observed for that query, i.e.:
 
 ```json
-{"blue shoes|south|super brand": {"doc0": 0.2, "doc1": 0.3, "doc2": 0.4}}
-{"other query": {"doc0": 0.0, "doc1": 0.0, "doc2": 0.1}}
+{"search_term:blue shoes|region:south|brand:super brand": {"doc0": 0.2, "doc1": 0.3, "doc2": 0.4}}
+{"search_term:query|region:north|brand:other_brand": {"doc0": 0.0, "doc1": 0.0, "doc2": 0.1}}
 ```
 
 Judgments here varies between 0 and 1. Some libraries requires it to range between integers 0 and 4. Choose a proper transformation in this case that better suits your data.
