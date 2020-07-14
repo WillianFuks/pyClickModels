@@ -1,2 +1,4 @@
 cython
 wheel
+numpy
+ujson
