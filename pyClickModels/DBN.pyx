@@ -125,12 +125,14 @@ cdef class Factor:
                             result *= (1 - self.gamma) * (1 - self.cr)
                         else:
                             result *= self.gamma * (1 - self.cr)
+        # Compute P(C_{>r},P_{>r} | E_{r+1})
         if not z:
             if self.last_r >= self.r + 1:
                 return 0
         else:
             if self.r < self.cp_vector_given_e[0].size():
                 result *= self.cp_vector_given_e[0][self.r]
+        # P(E_r=x | C<r, P<r)
         result *= (self.e_r_vector_given_CP[0][self.r] if x else
                    1 - self.e_r_vector_given_CP[0][self.r])
         return result
@@ -414,6 +416,7 @@ cdef class DBNModel():
         # Probability of clicks at positions greater than the last document in results
         # page is zero.
         X_r_vector[total_docs] = 0
+        gamma = self.get_param(b'gamma')
 
         for r in range(total_docs - 1, -1, -1):
             json_object_object_get_ex(
@@ -423,7 +426,6 @@ cdef class DBNModel():
             )
             doc = json_object_get_string(tmp)
             alpha = self.get_param(b'alpha', query, &doc)
-            gamma = self.get_param(b'gamma')
 
             X_r_1 = X_r_vector[r + 1]
             X_r = alpha[0] + (1 - alpha[0]) * gamma[0] * X_r_1
@@ -437,6 +439,10 @@ cdef class DBNModel():
         previous clicks and purchases.
 
         Mathematically: P(E_r = 1 | C_{<r}, P_{<r})
+
+        This is discussed in equation (24) in the blog post:
+
+        https://towardsdatascience.com/how-to-extract-relevance-from-clickstream-data-2a870df219fb
 
         Args
         ----
@@ -465,8 +471,10 @@ cdef class DBNModel():
             # position r + 1 will be required later so add +1 in computation
             vector[float] e_r_vector_given_CP = vector[float](total_docs + 1 - idx, 0.0)
 
-        # First document has 100% of being Examined regardless of clicks or purchases.
+        # First document has 100% chance of being Examined regardless of clicks or
+        # purchases.
         e_r_vector_given_CP[0] = 1
+        gamma = self.get_param(b'gamma')
 
         for r in range(idx, total_docs):
             json_object_object_get_ex(
@@ -492,7 +500,6 @@ cdef class DBNModel():
 
             alpha = self.get_param(b'alpha', query, &doc)
             sigma = self.get_param(b'sigma', query, &doc)
-            gamma = self.get_param(b'gamma')
 
             if purchase:
                 return e_r_vector_given_CP
@@ -602,6 +609,10 @@ cdef class DBNModel():
 
         P(C_{>r}, P_{>r} | E_{r+1})
 
+        This is equation (25) from blog post:
+
+        https://towardsdatascience.com/how-to-extract-relevance-from-clickstream-data-2a870df219fb
+
         Args
         ----
           clickstream: *json_object
@@ -624,13 +635,10 @@ cdef class DBNModel():
 
         # Subtract 1 as E_{r+1} is defined up to r - 1 documents
         for r in range(total_docs - 1):
-
             e_r_vector_given_CP = self.build_e_r_vector_given_CP(clickstream, r + 1,
                                                                  query)
-
             cp_vector_given_e[r] = self.compute_cp_p(clickstream, r + 1, query,
                                                      &e_r_vector_given_CP, cr_dict)
-
         return cp_vector_given_e
 
     cdef int get_last_r(self, json_object *clickstream, const char *event=b'click'):
@@ -803,7 +811,7 @@ cdef class DBNModel():
             )
         tmp_sigma_param[0][doc][1] += 1
 
-    cdef void update_tmp_gamma(
+    cdef int update_tmp_gamma(
         self,
         int r,
         int last_r,
@@ -813,7 +821,7 @@ cdef class DBNModel():
         vector[float] *e_r_vector_given_CP,
         unordered_map[string, float] *cr_dict,
         vector[float] *tmp_gamma_param
-    ):
+    ) except -1:
         """
         Updates the parameter gamma (persistence) by running the EM Algorithm.
 
@@ -868,7 +876,7 @@ cdef class DBNModel():
         json_object_object_get_ex(doc_data, b'purchase', &tmp)
         purchase = json_object_get_int(tmp)
 
-        alpha = self.get_param(b'gamma', query, &doc)[0]
+        alpha = self.get_param(b'alpha', query, &doc)[0]
         sigma = self.get_param(b'sigma', query, &doc)[0]
         gamma = self.get_param(b'gamma')[0]
 
@@ -894,11 +902,19 @@ cdef class DBNModel():
                 for k in range(2):
                     ESS_denominator += factor.compute_factor(i, j, k)
 
+        if not ESS_denominator:
+            raise RuntimeError(
+            'An error occurred during the optimization process. Please check if your '
+            'data input files have the correct format, such as each session not '
+            'having more than 1 sale in total.'
+        )
+
         ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
         ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
 
         tmp_gamma_param[0][0] += ESS_1
         tmp_gamma_param[0][1] += ESS_0 + ESS_1
+        return 0
 
     cdef void update_alpha_param(
         self,
@@ -1023,7 +1039,7 @@ cdef class DBNModel():
                 f.write(ujson.dumps(tmp).encode() + '\n'.encode())
                 postincrement(it)
 
-    cpdef void fit(self, str input_folder, int iters=30):
+    cpdef int fit(self, str input_folder, int iters=30) except -1:
         """
         Reads through data of queries and customers sessions to find appropriate values
         of `\\alpha_{uq}` (attractiveness), `\\sigma_{uq}` (satisfaction) and `\\gama`
@@ -1108,8 +1124,9 @@ cdef class DBNModel():
                     self.update_sigma_param(&query, &tmp_sigma_param)
                     self.update_gamma_param(&tmp_gamma_param)
                     json_object_put(row_json)
+        return 0
 
-    cdef void update_tmp_params(
+    cdef int update_tmp_params(
         self,
         json_object *clickstream,
         unordered_map[string, vector[float]] *tmp_alpha_param,
@@ -1117,7 +1134,7 @@ cdef class DBNModel():
         vector[float] *tmp_gamma_param,
         string *query,
         unordered_map[string, float] *cr_dict
-    ):
+    ) except -1:
         """
         For each session, applies the EM algorithm and save temporary results into
         the tmp input parameters.
@@ -1167,6 +1184,7 @@ cdef class DBNModel():
                                   tmp_sigma_param)
             self.update_tmp_gamma(r, last_r, doc_data, query, &cp_vector_given_e,
                                   &e_r_vector_given_CP, cr_dict, tmp_gamma_param)
+        return 0
 
     cdef void restart_tmp_params(
         self,

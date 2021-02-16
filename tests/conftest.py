@@ -82,24 +82,3 @@ def build_DBN_test_data(users=10, docs=10, queries=2):
         for row in final_result[half_results:]:
             f.write(json.dumps(row).encode() + '\n'.encode())
     return persistence, params, tmp_folder
-
-
-@pytest.fixture
-def sessions():
-    sessions = [
-        {
-            'sessionID': [
-                {"doc": "doc0", "click": 0, "purchase": 0},
-                {"doc": "doc1", "click": 1, "purchase": 0},
-                {"doc": "doc2", "click": 1, "purchase": 1}
-            ]
-        },
-        {
-            'sessionID': [
-                {"doc": "doc0", "click": 0, "purchase": 0},
-                {"doc": "doc1", "click": 1, "purchase": 0}
-            ]
-        },
-
-    ]
-    return sessions

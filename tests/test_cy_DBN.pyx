@@ -1886,6 +1886,17 @@ cdef bint test_export_judgments():
     return True
 
 
+cdef bint test_not_null_converence():
+    cdef:
+        DBNModel model = DBN()
+
+    try:
+        model.fit('tests/fixtures/null_test', iters=1)
+    except RuntimeError as err:
+        return True
+    return False
+
+
 cpdef run_tests():
     assert test_get_search_context_string()
     assert test_compute_cr()
@@ -1906,25 +1917,28 @@ cpdef run_tests():
     assert test_update_gamma_param()
     assert test_fit()
     assert test_export_judgments()
+    assert test_not_null_converence()
 
 
 if __name__ == '__main__':
-    assert test_get_search_context_string()
-    assert test_compute_cr()
-    assert test_get_param()
-    assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_cp_p(&alpha_params)
-    assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
-    assert test_get_last_r()
-    assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
-    assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
-    assert test_compute_factor_last_click_lower_than_r()
-    assert test_compute_factor_last_click_higher_than_r()
-    assert test_update_tmp_gamma()
-    assert test_update_alpha_params()
-    assert test_update_sigma_params()
-    assert test_update_gamma_param()
-    assert test_fit()
-    assert test_export_judgments()
+    #assert test_get_search_context_string()
+    #assert test_compute_cr()
+    #assert test_get_param()
+    #assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_cp_p(&alpha_params)
+    #assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_get_last_r()
+    #assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_compute_factor_last_click_lower_than_r()
+    #assert test_compute_factor_last_click_higher_than_r()
+    #assert test_update_tmp_gamma()
+    #assert test_update_alpha_params()
+    #assert test_update_sigma_params()
+    #assert test_update_gamma_param()
+    #assert test_fit()
+    #assert test_export_judgments()
+    #assert test_not_null_converence()
+    pass

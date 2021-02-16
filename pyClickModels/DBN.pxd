@@ -6,7 +6,7 @@ from pyClickModels.jsonc cimport *
 
 
 cdef class DBNModel:
-    cpdef void fit(self, str input_folder, int iters=*)
+    cpdef int fit(self, str input_folder, int iters=*) except -1
     cpdef void export_judgments(self, str output, str format_=*)
     cdef:
         float gamma_param
@@ -23,11 +23,11 @@ cdef class DBNModel:
         int get_last_r(self, json_object *clickstream, const char *event=*)
         void update_tmp_alpha(self, int r, string *query, json_object *doc_data, vector[float] *e_r_vector, vector[float] *X_r_vector, int last_r, unordered_map[string, vector[float]] *tmp_alpha_param)
         void update_tmp_sigma(self, string *query, int r, json_object *doc_data, vector[float] *X_r_vector, int last_r, unordered_map[string, vector[float]] *tmp_sigma_param)
-        void update_tmp_gamma(self, int r, int last_r, json_object *doc_data, string *query, vector[float] *cp_vector_given_e, vector[float] *e_r_vector_given_CP, unordered_map[string, float] *cr_dict, vector[float] *tmp_gamma_param)
+        int update_tmp_gamma(self, int r, int last_r, json_object *doc_data, string *query, vector[float] *cp_vector_given_e, vector[float] *e_r_vector_given_CP, unordered_map[string, float] *cr_dict, vector[float] *tmp_gamma_param) except -1
         void update_alpha_param(self, string *query, unordered_map[string, vector[float]] *tmp_alpha_param)
         void update_sigma_param(self, string *query, unordered_map[string, vector[float]] *tmp_sigma_param)
         void update_gamma_param(self, vector[float] *tmp_gamma_param)
-        void update_tmp_params(self, json_object *session, unordered_map[string, vector[float]] *tmp_alpha_param, unordered_map[string, vector[float]] *tmp_sigma_param, vector[float] *tmp_gamma_param, string *query, unordered_map[string, float] *cr_dict)
+        int update_tmp_params(self, json_object *session, unordered_map[string, vector[float]] *tmp_alpha_param, unordered_map[string, vector[float]] *tmp_sigma_param, vector[float] *tmp_gamma_param, string *query, unordered_map[string, float] *cr_dict) except -1
         void restart_tmp_params(self, unordered_map[string, vector[float]] *tmp_alpha_param, unordered_map[string, vector[float]] *tmp_sigma_param, vector[float] *tmp_gamma_param)
 
 cdef class Factor:
