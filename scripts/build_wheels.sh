@@ -1,4 +1,5 @@
 docker run -v $(pwd):/pyClickModels quay.io/pypa/manylinux1_x86_64 sh -c '''
+yum update
 yum install -y json-c-devel
 
 cd /pyClickModels
