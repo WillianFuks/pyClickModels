@@ -2,13 +2,13 @@ from __future__ import absolute_import
 
 import os
 import sys
-import Cython.Compiler.Options
 from codecs import open
-from Cython.Distutils import build_ext
 from setuptools import setup
-from Cython.Build import cythonize
-from distutils.extension import Extension
 from setuptools.command.test import test as TestCommand
+from distutils.extension import Extension
+import Cython.Compiler.Options
+from Cython.Distutils import build_ext
+from Cython.Build import cythonize
 
 
 here = os.path.abspath(os.path.dirname(__file__))

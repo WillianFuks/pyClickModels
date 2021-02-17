@@ -1,16 +1,23 @@
-import tempfile
-import ujson
 import gzip
+import tempfile
+
+import ujson
+
+from cython.operator cimport dereference, postincrement
 from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
-from cython.operator cimport dereference, postincrement
+
 from pyClickModels.DBN cimport DBNModel, Factor
+
 from pyClickModels.DBN import DBN
-from pyClickModels.jsonc cimport(json_object, json_tokener_parse,
-                                 json_object_get_object, lh_table, json_object_put)
+
+from pyClickModels.jsonc cimport (json_object, json_object_get_object,
+                                  json_object_put, json_tokener_parse,
+                                  lh_table)
+
 from conftest import build_DBN_test_data
-from numpy.testing import assert_almost_equal, assert_allclose
+from numpy.testing import assert_allclose, assert_almost_equal
 
 ctypedef unordered_map[string, unordered_map[string, float]] dbn_param
 
@@ -49,7 +56,6 @@ cdef bint test_fit():
 
     # it = model.alpha_params.begin()
     while(it != model.alpha_params.end()):
-    #     prints keys
         # print(dereference(it).first)
         query = (dereference(it).first)
         dquery = extract_keys(query)
@@ -1886,6 +1892,22 @@ cdef bint test_export_judgments():
     return True
 
 
+cdef bint test_not_null_converence():
+    cdef:
+        DBNModel model = DBN()
+
+    model.fit('tests/fixtures/null_test', iters=1)
+    return True
+
+
+cdef bint test_long_list_null_converence():
+    cdef:
+        DBNModel model = DBN()
+
+    model.fit('tests/fixtures/eighty_skus', iters=2)
+    return True
+
+
 cpdef run_tests():
     assert test_get_search_context_string()
     assert test_compute_cr()
@@ -1906,25 +1928,29 @@ cpdef run_tests():
     assert test_update_gamma_param()
     assert test_fit()
     assert test_export_judgments()
+    assert test_not_null_converence()
+    assert test_long_list_null_converence()
 
 
 if __name__ == '__main__':
-    assert test_get_search_context_string()
-    assert test_compute_cr()
-    assert test_get_param()
-    assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
-    assert test_build_cp_p(&alpha_params)
-    assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
-    assert test_get_last_r()
-    assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
-    assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
-    assert test_compute_factor_last_click_lower_than_r()
-    assert test_compute_factor_last_click_higher_than_r()
-    assert test_update_tmp_gamma()
-    assert test_update_alpha_params()
-    assert test_update_sigma_params()
-    assert test_update_gamma_param()
-    assert test_fit()
-    assert test_export_judgments()
+    #assert test_get_search_context_string()
+    #assert test_compute_cr()
+    #assert test_get_param()
+    #assert test_build_e_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_X_r_vector(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_e_r_vector_given_CP(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_build_cp_p(&alpha_params)
+    #assert test_build_CP_vector_given_e(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_get_last_r()
+    #assert test_update_tmp_alpha(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_update_tmp_sigma(&alpha_params, &sigma_params, &gamma_param)
+    #assert test_compute_factor_last_click_lower_than_r()
+    #assert test_compute_factor_last_click_higher_than_r()
+    #assert test_update_tmp_gamma()
+    #assert test_update_alpha_params()
+    #assert test_update_sigma_params()
+    #assert test_update_gamma_param()
+    #assert test_fit()
+    #assert test_export_judgments()
+    #assert test_not_null_converence()
+    pass

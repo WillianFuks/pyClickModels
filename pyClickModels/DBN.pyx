@@ -1,22 +1,24 @@
 # cython: linetrace=True
 
-import os
-from glob import glob
 import gzip
+import os
 import time
-import ujson
-from libcpp.vector cimport vector
-from libcpp.unordered_map cimport unordered_map
-from libcpp.string cimport string
-from libc.stdlib cimport rand, RAND_MAX, srand
-from libc.time cimport time as ctime
-from cython.operator cimport dereference, postincrement
-from pyClickModels.jsonc cimport(json_object, json_tokener_parse,
-                                 json_object_object_get_ex, json_object_get_string,
-                                 lh_table, lh_entry, json_object_array_length,
-                                 json_object_array_get_idx, json_object_get_int,
-                                 json_object_put)
+from glob import glob
 
+import ujson
+
+from cython.operator cimport dereference, postincrement
+from libc.stdlib cimport RAND_MAX, rand, srand
+from libc.time cimport time as ctime
+from libcpp.string cimport string
+from libcpp.unordered_map cimport unordered_map
+from libcpp.vector cimport vector
+
+from pyClickModels.jsonc cimport (json_object, json_object_array_get_idx,
+                                  json_object_array_length,
+                                  json_object_get_int, json_object_get_string,
+                                  json_object_object_get_ex, json_object_put,
+                                  json_tokener_parse, lh_entry, lh_table)
 
 # Start by setting the seed for the random values required for initalizing the DBN
 # parameters.
@@ -125,12 +127,14 @@ cdef class Factor:
                             result *= (1 - self.gamma) * (1 - self.cr)
                         else:
                             result *= self.gamma * (1 - self.cr)
+        # Compute P(C_{>r},P_{>r} | E_{r+1})
         if not z:
             if self.last_r >= self.r + 1:
                 return 0
         else:
             if self.r < self.cp_vector_given_e[0].size():
                 result *= self.cp_vector_given_e[0][self.r]
+        # P(E_r=x | C<r, P<r)
         result *= (self.e_r_vector_given_CP[0][self.r] if x else
                    1 - self.e_r_vector_given_CP[0][self.r])
         return result
@@ -414,6 +418,7 @@ cdef class DBNModel():
         # Probability of clicks at positions greater than the last document in results
         # page is zero.
         X_r_vector[total_docs] = 0
+        gamma = self.get_param(b'gamma')
 
         for r in range(total_docs - 1, -1, -1):
             json_object_object_get_ex(
@@ -423,7 +428,6 @@ cdef class DBNModel():
             )
             doc = json_object_get_string(tmp)
             alpha = self.get_param(b'alpha', query, &doc)
-            gamma = self.get_param(b'gamma')
 
             X_r_1 = X_r_vector[r + 1]
             X_r = alpha[0] + (1 - alpha[0]) * gamma[0] * X_r_1
@@ -437,6 +441,10 @@ cdef class DBNModel():
         previous clicks and purchases.
 
         Mathematically: P(E_r = 1 | C_{<r}, P_{<r})
+
+        This is discussed in equation (24) in the blog post:
+
+        https://towardsdatascience.com/how-to-extract-relevance-from-clickstream-data-2a870df219fb
 
         Args
         ----
@@ -465,8 +473,10 @@ cdef class DBNModel():
             # position r + 1 will be required later so add +1 in computation
             vector[float] e_r_vector_given_CP = vector[float](total_docs + 1 - idx, 0.0)
 
-        # First document has 100% of being Examined regardless of clicks or purchases.
+        # First document has 100% chance of being Examined regardless of clicks or
+        # purchases.
         e_r_vector_given_CP[0] = 1
+        gamma = self.get_param(b'gamma')
 
         for r in range(idx, total_docs):
             json_object_object_get_ex(
@@ -492,7 +502,6 @@ cdef class DBNModel():
 
             alpha = self.get_param(b'alpha', query, &doc)
             sigma = self.get_param(b'sigma', query, &doc)
-            gamma = self.get_param(b'gamma')
 
             if purchase:
                 return e_r_vector_given_CP
@@ -602,6 +611,10 @@ cdef class DBNModel():
 
         P(C_{>r}, P_{>r} | E_{r+1})
 
+        This is equation (25) from blog post:
+
+        https://towardsdatascience.com/how-to-extract-relevance-from-clickstream-data-2a870df219fb
+
         Args
         ----
           clickstream: *json_object
@@ -624,13 +637,10 @@ cdef class DBNModel():
 
         # Subtract 1 as E_{r+1} is defined up to r - 1 documents
         for r in range(total_docs - 1):
-
             e_r_vector_given_CP = self.build_e_r_vector_given_CP(clickstream, r + 1,
                                                                  query)
-
             cp_vector_given_e[r] = self.compute_cp_p(clickstream, r + 1, query,
                                                      &e_r_vector_given_CP, cr_dict)
-
         return cp_vector_given_e
 
     cdef int get_last_r(self, json_object *clickstream, const char *event=b'click'):
@@ -868,7 +878,7 @@ cdef class DBNModel():
         json_object_object_get_ex(doc_data, b'purchase', &tmp)
         purchase = json_object_get_int(tmp)
 
-        alpha = self.get_param(b'gamma', query, &doc)[0]
+        alpha = self.get_param(b'alpha', query, &doc)[0]
         sigma = self.get_param(b'sigma', query, &doc)[0]
         gamma = self.get_param(b'gamma')[0]
 
@@ -887,6 +897,7 @@ cdef class DBNModel():
             e_r_vector_given_CP,
             cp_vector_given_e
         )
+
         # Loop through all possible values of x, y and z, where each is an integer
         # boolean.
         for i in range(2):
@@ -894,8 +905,11 @@ cdef class DBNModel():
                 for k in range(2):
                     ESS_denominator += factor.compute_factor(i, j, k)
 
-        ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
-        ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
+        if not ESS_denominator:
+            ESS_0, ESS_1 = 0, 0
+        else:
+            ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
+            ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
 
         tmp_gamma_param[0][0] += ESS_1
         tmp_gamma_param[0][1] += ESS_0 + ESS_1

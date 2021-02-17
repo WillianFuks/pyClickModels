@@ -2,7 +2,7 @@
 
 flake8:
 	pip install -U flake8
-	flake8
+	flake8 pyClickModels
 
 isort:
 	pip install -U isort
@@ -30,4 +30,4 @@ publish:
 	sh ./scripts/build_wheels.sh
 	#twine upload --repository testpypi dist/*
 	twine upload dist/*
-	rm -fr build dist .egg *.egg-info
+	#rm -fr build dist .egg *.egg-info
