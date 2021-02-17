@@ -71,35 +71,7 @@ If no context is desired, just use `{"search_keys": {"search_term": "user search
 
 There's no required schema here which means the library loops through all keys available in `search_keys` and builds the optimization process considering the whole context as a single query.
 
-As for the `judgment_keys`, this is a list of sessions. The key `session` is mandatory. Each session contains the clickstream of users (if the variable purchase is not required set it to 0). For each session, there can only be **1 purchase**, otherwise the model will raise `RuntimeError`.
-
-As an example, this input data will raise:
-
-```json
-
-{
-    "search_keys": {
-        "search_term": "term"
-    },
-    "judgment_keys": [
-        {
-            "session": [
-                {
-                    "click": 0, "purchase": 1, "doc": "doc0"
-                },
-                {
-                    "click": 0, "purchase": 0, "doc": "doc1"
-                },
-                {
-                    "click": 0, "purchase": 1, "doc": "doc2"
-                }
-            ]
-        }
-    ]
-}
-```
-
-as for a given session `doc0` and `doc2` had purchases for query `term`.
+As for the `judgment_keys`, this is a list of sessions. The key `session` is mandatory. Each session contains the clickstream of users (if the variable purchase is not required set it to 0).
 
 For running DBN from pyClickModels, here's a simple example:
 

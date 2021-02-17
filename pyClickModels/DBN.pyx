@@ -811,7 +811,7 @@ cdef class DBNModel():
             )
         tmp_sigma_param[0][doc][1] += 1
 
-    cdef int update_tmp_gamma(
+    cdef void update_tmp_gamma(
         self,
         int r,
         int last_r,
@@ -821,7 +821,7 @@ cdef class DBNModel():
         vector[float] *e_r_vector_given_CP,
         unordered_map[string, float] *cr_dict,
         vector[float] *tmp_gamma_param
-    ) except -1:
+    ):
         """
         Updates the parameter gamma (persistence) by running the EM Algorithm.
 
@@ -895,6 +895,7 @@ cdef class DBNModel():
             e_r_vector_given_CP,
             cp_vector_given_e
         )
+
         # Loop through all possible values of x, y and z, where each is an integer
         # boolean.
         for i in range(2):
@@ -903,18 +904,13 @@ cdef class DBNModel():
                     ESS_denominator += factor.compute_factor(i, j, k)
 
         if not ESS_denominator:
-            raise RuntimeError(
-            'An error occurred during the optimization process. Please check if your '
-            'data input files have the correct format, such as each session not '
-            'having more than 1 sale in total.'
-        )
-
-        ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
-        ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
+            ESS_0, ESS_1 = 0, 0
+        else:
+            ESS_0 = factor.compute_factor(1, 0, 0) / ESS_denominator
+            ESS_1 = factor.compute_factor(1, 0, 1) / ESS_denominator
 
         tmp_gamma_param[0][0] += ESS_1
         tmp_gamma_param[0][1] += ESS_0 + ESS_1
-        return 0
 
     cdef void update_alpha_param(
         self,
@@ -1039,7 +1035,7 @@ cdef class DBNModel():
                 f.write(ujson.dumps(tmp).encode() + '\n'.encode())
                 postincrement(it)
 
-    cpdef int fit(self, str input_folder, int iters=30) except -1:
+    cpdef void fit(self, str input_folder, int iters=30):
         """
         Reads through data of queries and customers sessions to find appropriate values
         of `\\alpha_{uq}` (attractiveness), `\\sigma_{uq}` (satisfaction) and `\\gama`
@@ -1124,9 +1120,8 @@ cdef class DBNModel():
                     self.update_sigma_param(&query, &tmp_sigma_param)
                     self.update_gamma_param(&tmp_gamma_param)
                     json_object_put(row_json)
-        return 0
 
-    cdef int update_tmp_params(
+    cdef void update_tmp_params(
         self,
         json_object *clickstream,
         unordered_map[string, vector[float]] *tmp_alpha_param,
@@ -1134,7 +1129,7 @@ cdef class DBNModel():
         vector[float] *tmp_gamma_param,
         string *query,
         unordered_map[string, float] *cr_dict
-    ) except -1:
+    ):
         """
         For each session, applies the EM algorithm and save temporary results into
         the tmp input parameters.
@@ -1184,7 +1179,6 @@ cdef class DBNModel():
                                   tmp_sigma_param)
             self.update_tmp_gamma(r, last_r, doc_data, query, &cp_vector_given_e,
                                   &e_r_vector_given_CP, cr_dict, tmp_gamma_param)
-        return 0
 
     cdef void restart_tmp_params(
         self,

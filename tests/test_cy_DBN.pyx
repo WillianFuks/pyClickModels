@@ -1890,11 +1890,16 @@ cdef bint test_not_null_converence():
     cdef:
         DBNModel model = DBN()
 
-    try:
-        model.fit('tests/fixtures/null_test', iters=1)
-    except RuntimeError as err:
-        return True
-    return False
+    model.fit('tests/fixtures/null_test', iters=1)
+    return True
+
+
+cdef bint test_long_list_null_converence():
+    cdef:
+        DBNModel model = DBN()
+
+    model.fit('tests/fixtures/eighty_skus', iters=2)
+    return True
 
 
 cpdef run_tests():
@@ -1918,6 +1923,7 @@ cpdef run_tests():
     assert test_fit()
     assert test_export_judgments()
     assert test_not_null_converence()
+    assert test_long_list_null_converence()
 
 
 if __name__ == '__main__':
