@@ -6,6 +6,7 @@ cd /pyClickModels
 
 for PYVER in /opt/python/*/bin/; do
     if [[ $PYVER != *"27"* ]]; then
+        "${PYVER}/pip" install -U pip
         "${PYVER}/pip" install -U setuptools
         "${PYVER}/pip" install -r requirements.txt
         "${PYVER}/python" setup.py sdist bdist_wheel
