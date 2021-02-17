@@ -1,16 +1,23 @@
-import tempfile
-import ujson
 import gzip
+import tempfile
+
+import ujson
+
+from cython.operator cimport dereference, postincrement
 from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
 from libcpp.vector cimport vector
-from cython.operator cimport dereference, postincrement
+
 from pyClickModels.DBN cimport DBNModel, Factor
+
 from pyClickModels.DBN import DBN
-from pyClickModels.jsonc cimport(json_object, json_tokener_parse,
-                                 json_object_get_object, lh_table, json_object_put)
+
+from pyClickModels.jsonc cimport (json_object, json_object_get_object,
+                                  json_object_put, json_tokener_parse,
+                                  lh_table)
+
 from conftest import build_DBN_test_data
-from numpy.testing import assert_almost_equal, assert_allclose
+from numpy.testing import assert_allclose, assert_almost_equal
 
 ctypedef unordered_map[string, unordered_map[string, float]] dbn_param
 
@@ -49,7 +56,6 @@ cdef bint test_fit():
 
     # it = model.alpha_params.begin()
     while(it != model.alpha_params.end()):
-    #     prints keys
         # print(dereference(it).first)
         query = (dereference(it).first)
         dquery = extract_keys(query)

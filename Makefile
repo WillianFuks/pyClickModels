@@ -2,7 +2,7 @@
 
 flake8:
 	pip install -U flake8
-	flake8
+	flake8 pyClickModels
 
 isort:
 	pip install -U isort

@@ -1,22 +1,24 @@
 # cython: linetrace=True
 
-import os
-from glob import glob
 import gzip
+import os
 import time
-import ujson
-from libcpp.vector cimport vector
-from libcpp.unordered_map cimport unordered_map
-from libcpp.string cimport string
-from libc.stdlib cimport rand, RAND_MAX, srand
-from libc.time cimport time as ctime
-from cython.operator cimport dereference, postincrement
-from pyClickModels.jsonc cimport(json_object, json_tokener_parse,
-                                 json_object_object_get_ex, json_object_get_string,
-                                 lh_table, lh_entry, json_object_array_length,
-                                 json_object_array_get_idx, json_object_get_int,
-                                 json_object_put)
+from glob import glob
 
+import ujson
+
+from cython.operator cimport dereference, postincrement
+from libc.stdlib cimport RAND_MAX, rand, srand
+from libc.time cimport time as ctime
+from libcpp.string cimport string
+from libcpp.unordered_map cimport unordered_map
+from libcpp.vector cimport vector
+
+from pyClickModels.jsonc cimport (json_object, json_object_array_get_idx,
+                                  json_object_array_length,
+                                  json_object_get_int, json_object_get_string,
+                                  json_object_object_get_ex, json_object_put,
+                                  json_tokener_parse, lh_entry, lh_table)
 
 # Start by setting the seed for the random values required for initalizing the DBN
 # parameters.
