@@ -1896,7 +1896,7 @@ cdef bint test_not_null_converence():
     cdef:
         DBNModel model = DBN()
 
-    model.fit('tests/fixtures/null_test', iters=1)
+    model.fit('tests/fixtures/null_test', iters=10)
     return True
 
 
@@ -1904,7 +1904,15 @@ cdef bint test_long_list_null_converence():
     cdef:
         DBNModel model = DBN()
 
-    model.fit('tests/fixtures/eighty_skus', iters=2)
+    model.fit('tests/fixtures/eighty_skus', iters=10)
+    return True
+
+
+cdef bint test_all_clicks_set():
+    cdef:
+        DBNModel model = DBN()
+
+    model.fit('tests/fixtures/all_clicks_set', iters=10)
     return True
 
 
@@ -1930,6 +1938,7 @@ cpdef run_tests():
     assert test_export_judgments()
     assert test_not_null_converence()
     assert test_long_list_null_converence()
+    assert test_all_clicks_set()
 
 
 if __name__ == '__main__':
